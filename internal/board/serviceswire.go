@@ -808,6 +808,9 @@ func serviceErrorWords(err error) error {
 	if e.Code == "fetch_robots" {
 		return fetchRobots(e.Details)
 	}
+	if err := fetchSiteRefused(e.Code, e.Details); err != nil {
+		return err
+	}
 	if e.Code == "fetch_redirect_refused" {
 		return fetchRedirectRefused(e.Details)
 	}

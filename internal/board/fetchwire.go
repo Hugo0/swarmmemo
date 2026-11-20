@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/services"
@@ -26,12 +25,8 @@ func fetchError(code string) error {
 		return problem(403, "fetch_denied", "This site is not fetched: it is on the operator's denylist, or it is SwarmMemo itself. Nothing was charged.")
 	case "fetch_robots":
 		return fetchRobots(nil)
-	case "fetch_blocked":
-		return problem(403, "fetch_blocked", "The site answered 401 or 403: it does not serve this page to us. We do not retry or work around that. Nothing was charged.")
-	case "fetch_captcha":
-		return problem(403, "fetch_captcha", "The site answered with a bot challenge (a CAPTCHA). We do not solve or work around challenges. Nothing was charged. If a task needs proof of the page, cite an archive snapshot URL in your result for a reviewer to open.")
-	case "fetch_site_rate_limited":
-		return &Error{Status: 429, Code: "fetch_site_rate_limited", Message: "The site answered 429 Too Many Requests. We do not retry it; ask again later. Nothing was charged.", RetryAfter: services.FetchCacheSeconds}
+	case "fetch_blocked", "fetch_captcha", "fetch_site_rate_limited":
+		return fetchSiteRefused(code, nil)
 	case "fetch_not_found":
 		return problem(404, "fetch_not_found", "The site answered 404 or 410: there is no page at this URL. Nothing was charged.")
 	case "fetch_upstream_error":
@@ -76,25 +71,60 @@ func fetchInvalidURL(placeholder string) error {
 	return problem(400, "fetch_invalid_url", msg+" Nothing was charged.")
 }
 
-// fetchRobotsDatasetsNamed bounds the public_data datasets fetch_robots names.
-const fetchRobotsDatasetsNamed = 3
+// fetchPublicData is the public_data hint a site refusal carries when the
+// run recorded one (services' withPublicDataHint, C1147): the sentence that
+// names the dataset and its call, and details.public_data {dataset, call}.
+// Without one both are empty.
+func fetchPublicData(details any) (string, map[string]any) {
+	d, _ := details.(map[string]any)
+	h, _ := d["public_data"].(map[string]any)
+	ds, _ := h["dataset"].(string)
+	call, _ := h["call"].(string)
+	if ds == "" || call == "" {
+		return "", nil
+	}
+	return "public_data reads this site's data as dataset " + ds + ": call " + call + " instead (details.public_data), and stamp the answer's sources[] raw_sha256 with notary to cite it.",
+		map[string]any{"public_data": map[string]any{"dataset": ds, "call": call}}
+}
+
+// fetchSiteRefused is fetch_blocked, fetch_captcha or
+// fetch_site_rate_limited, naming the public_data dataset that reads the
+// site when the run recorded one (details.public_data).
+func fetchSiteRefused(code string, details any) error {
+	hint, d := fetchPublicData(details)
+	var e *Error
+	switch code {
+	case "fetch_blocked":
+		e = &Error{Status: 403, Code: "fetch_blocked", Message: "The site answered 401 or 403: it does not serve this page to us. We do not retry or work around that. Nothing was charged."}
+	case "fetch_captcha":
+		e = &Error{Status: 403, Code: "fetch_captcha", Message: "The site answered with a bot challenge (a CAPTCHA). We do not solve or work around challenges. Nothing was charged. If a task needs proof of the page, cite an archive snapshot URL in your result for a reviewer to open."}
+	case "fetch_site_rate_limited":
+		e = &Error{Status: 429, Code: "fetch_site_rate_limited", Message: "The site answered 429 Too Many Requests. We do not retry it; ask again later. Nothing was charged.", RetryAfter: services.FetchCacheSeconds}
+	default:
+		return nil
+	}
+	if hint != "" {
+		e.Message += " " + hint
+		e.Details = d
+	}
+	return e
+}
 
 // fetchRobots is fetch_robots, naming the robots.txt line that matched
 // (details.robots_line, already sanitised and capped by services), the 5xx
 // robots.txt answered when that disallowed every page (details.robots_status,
-// RFC 9309; C1052) and the
-// public_data datasets that read the host (details.datasets) when the run
-// recorded them. The details shape the message only: the answer carries no
-// details, so strict clients see the same keys as before (C842).
+// RFC 9309; C1052) and the public_data dataset that reads the site
+// (details.public_data, C1147) when the run recorded them. Only
+// details.public_data reaches the answer; the robots line and status shape
+// the message alone (C842).
 func fetchRobots(details any) error {
 	var line string
-	var ids []string
 	var status int
 	if d, ok := details.(map[string]any); ok {
 		line, _ = d["robots_line"].(string)
-		ids, _ = d["datasets"].([]string)
 		status, _ = d["robots_status"].(int)
 	}
+	hint, hd := fetchPublicData(details)
 	msg := "The site's robots.txt does not let SwarmMemoFetch read this page"
 	if line != "" {
 		msg += " (its line `" + line + "` covers this path)"
@@ -103,17 +133,10 @@ func fetchRobots(details any) error {
 	if status != 0 {
 		msg = "The site's robots.txt answered " + strconv.Itoa(status) + ", a server error, so SwarmMemoFetch treats every page on the host as disallowed (RFC 9309) and did not request this one; retry later, once the site recovers."
 	}
-	switch {
-	case len(ids) == 1:
-		msg += " public_data dataset " + ids[0] + " reads this host: call /call/public_data/fetch?dataset=" + ids[0] + " and stamp a sources[] raw_sha256 with notary instead."
-	case len(ids) > 1:
-		if len(ids) > fetchRobotsDatasetsNamed {
-			ids = ids[:fetchRobotsDatasetsNamed]
-		}
-		msg += " public_data datasets " + strings.Join(ids, ", ") + " read this host: call /call/public_data/fetch?dataset=" + ids[0] + " (or another of them) and stamp a sources[] raw_sha256 with notary instead."
-	default:
-		msg += " If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead."
+	if hint != "" {
+		return &Error{Status: 403, Code: "fetch_robots", Message: msg + " " + hint + " Nothing was charged.", Details: hd}
 	}
+	msg += " If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead."
 	return problem(403, "fetch_robots", msg+" Nothing was charged.")
 }
 

@@ -129,6 +129,12 @@ func pdRoutes(v *pdEnv) map[string]func(r *http.Request) (string, int) {
 			}
 			return "fda_not_found.json", 404
 		},
+		"www.fda.gov": func(r *http.Request) (string, int) {
+			if r.URL.Path != "/about-fda/contact-fda/stay-informed/rss-feeds/food-safety-recalls/rss.xml" {
+				return "", 404
+			}
+			return "fda_announcements.xml", 200
+		},
 		"api.congress.gov": func(r *http.Request) (string, int) {
 			if !keyed(r) {
 				return "", 403
@@ -616,17 +622,29 @@ func TestPublicDataRecalls(t *testing.T) {
 		t.Errorf("every source answered: no partial: %v", d["partial"])
 	}
 	eq(t, "source", at(d, "recalls", 0, "source"), "FSIS (USDA)")
+	eq(t, "source_id", at(d, "recalls", 0, "source_id"), "fsis")
 	eq(t, "firm", at(d, "recalls", 0, "firm"), "Synear Foods USA LLC")
 	eq(t, "status", at(d, "recalls", 0, "status"), "Active")
 	eq(t, "class", at(d, "recalls", 0, "classification"), "Class I")
 	eq(t, "date", at(d, "recalls", 0, "date"), "2026-07-18")
 	eq(t, "untrusted", item["text_is_untrusted"], true)
+	eq(t, "checked", d["sources_checked"], []any{"FSIS", "openFDA", "FDA announcements"})
 
+	// A recall in both FDA sources is one row, the enforcement report's,
+	// carrying the announcement's link; an announcement weeks from any
+	// report is a row of its own (C1146).
 	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"ongoing"}`, unix("2026-07-20"))
-	eq(t, "fda count", d["count"], 1.0)
+	eq(t, "fda count", d["count"], 2.0)
 	eq(t, "fda source", at(d, "recalls", 0, "source"), "FDA (openFDA food enforcement)")
+	eq(t, "fda source_id", at(d, "recalls", 0, "source_id"), "fda_enforcement")
 	eq(t, "fda date", at(d, "recalls", 0, "date"), "2026-07-10")
 	eq(t, "fda status", at(d, "recalls", 0, "status"), "Ongoing")
+	eq(t, "deduped keeps enforcement detail", at(d, "recalls", 0, "classification"), "Class I")
+	eq(t, "deduped keeps the announcement link", at(d, "recalls", 0, "url"),
+		"https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/resers-fine-foods-inc-recalls-potato-salad")
+	eq(t, "far announcement is its own row", at(d, "recalls", 1, "source_id"), "fda_announcement")
+	eq(t, "far announcement date", at(d, "recalls", 1, "date"), "2026-06-01")
+	eq(t, "far announcement product", at(d, "recalls", 1, "product"), "Bean Dip")
 	eq(t, "status normalised", at(item, "params", "status"), "active")
 	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"closed"}`, unix("2026-07-20"))
 	eq(t, "closed", d["count"], 0.0)
@@ -640,38 +658,86 @@ func TestPublicDataRecalls(t *testing.T) {
 		eq(t, "closed search", closed.Get("search"), `recalling_firm:"Reser" AND (status:"Completed" OR status:"Terminated")`)
 		eq(t, "newest first", active.Get("sort"), "recall_initiation_date:desc")
 	}
-	// as_of is openFDA's meta.last_updated when newer than the newest row,
-	// and an empty answer says how far the feed lags (C838).
-	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"ongoing"}`, unix("2026-07-20"))
-	eq(t, "as_of from openFDA meta", item["as_of"], "2026-07-15")
+
+	// A recall FDA announced after openFDA's last update is found from the
+	// announcement alone (measuredwork-743b0463: Naia, a5e6773d).
+	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Naia"}`, unix("2026-07-20"))
+	eq(t, "announced count", d["count"], 1.0)
+	eq(t, "announced source", at(d, "recalls", 0, "source"), "FDA (recall announcement)")
+	eq(t, "announced source_id", at(d, "recalls", 0, "source_id"), "fda_announcement")
+	eq(t, "announced firm", at(d, "recalls", 0, "firm"), "Naia, Inc.")
+	eq(t, "announced product", at(d, "recalls", 0, "product"), "Chocolate Banana Bar Sorbetto")
+	eq(t, "announced reason", at(d, "recalls", 0, "reason"), "Undeclared Milk, Eggs, and Nuts")
+	eq(t, "announced date", at(d, "recalls", 0, "date"), "2026-07-16")
+	eq(t, "announced status", at(d, "recalls", 0, "status"), "Announced")
+	eq(t, "announced class", at(d, "recalls", 0, "classification"), nil)
+	eq(t, "announced url", at(d, "recalls", 0, "url"),
+		"https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/naia-inc-recalls-chocolate-banana-bar-sorbetto-because-undeclared-milk-eggs-and-nuts")
+	eq(t, "announced note", d["note"], "Rows with source_id fda_announcement are FDA recall announcements not yet in openFDA's enforcement feed: status Announced, no classification yet.")
+	eq(t, "announced as_of", item["as_of"], "2026-07-16")
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Naia","status":"closed"}`, unix("2026-07-20"))
+	eq(t, "an announcement is not closed", d["count"], 0.0)
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Fresh & Ready Foods"}`, unix("2026-07-20"))
+	eq(t, "entities", at(d, "recalls", 0, "firm"), "Fresh & Ready Foods LLC")
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Offsite Snacks"}`, unix("2026-07-20"))
+	eq(t, "an off-site link is dropped", at(d, "recalls", 0, "url"), nil)
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Example Pump"}`, unix("2026-07-20"))
+	eq(t, "no verb: no firm", at(d, "recalls", 0, "firm"), nil)
+	eq(t, "no verb: the headline", at(d, "recalls", 0, "product"), "Medical Device Correction Update Example Pump (Model X1)")
+	// "Naia" is a word of the firm, as in openFDA's phrase search: "Nai" is not.
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Nai"}`, unix("2026-07-20"))
+	eq(t, "phrase match", d["count"], 0.0)
+
 	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Synear"}`, unix("2026-07-20"))
 	eq(t, "as_of newest row", item["as_of"], "2026-07-18")
 	item, d = v.mustFetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20"))
 	eq(t, "nobody count", d["count"], 0.0)
-	eq(t, "as_of from feed meta on a 404", item["as_of"], "2026-07-14")
+	eq(t, "as_of from the newest announcement", item["as_of"], "2026-07-16")
 	eq(t, "lag note", d["note"], "no recalls matching this firm in the sources checked; absence means something only for those sources. "+
-		"openFDA's enforcement feed was last updated 2026-07-14; recalls announced since then are not in it yet.")
+		"openFDA's enforcement feed was last updated 2026-07-14; FDA's recall announcements since 2026-06-01 were checked too.")
 	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Jerky","status":"closed"}`, unix("2026-07-20"))
 	eq(t, "fsis closed", at(d, "recalls", 0, "status"), "Closed")
 
-	// The FSIS list is fetched once and served from the cache for every firm.
+	// The FSIS list and the announcements feed are fetched once and served
+	// from the cache for every firm.
 	if n := v.fakes["www.fsis.usda.gov"].count(); n != 1 {
 		t.Errorf("FSIS fetched %d times, want 1", n)
 	}
-	// No openFDA meta: as_of stays null and the note has no lag clause.
+	if n := v.fakes["www.fda.gov"].count(); n != 1 {
+		t.Errorf("FDA announcements fetched %d times, want 1", n)
+	}
+	// No openFDA meta: the note has no enforcement lag clause.
 	v3 := newPDEnv(t, false)
 	v3.fakes["api.fda.gov"].route = func(r *http.Request) (string, int) { return "fda_not_found.json", 404 }
 	item, d = v3.mustFetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20"))
 	eq(t, "no meta count", d["count"], 0.0)
-	eq(t, "no meta as_of", item["as_of"], nil)
+	eq(t, "no meta as_of", item["as_of"], "2026-07-16")
 	eq(t, "no meta note", d["note"], "no recalls matching this firm in the sources checked; absence means something only for those sources")
-	eq(t, "no meta still checked", d["sources_checked"], []any{"FSIS", "openFDA"})
+	eq(t, "no meta still checked", d["sources_checked"], []any{"FSIS", "openFDA", "FDA announcements"})
 
-	// FSIS refusing us still answers from openFDA, saying what is missing.
+	// The announcements feed failing: listed as failed, partial, and the
+	// note says what may be missing; as_of is openFDA's meta.
+	v4 := newPDEnv(t, false)
+	v4.fakes["www.fda.gov"].set("403")
+	item, d = v4.mustFetch(t, "food_recalls", `{"firm":"Naia"}`, unix("2026-07-20"))
+	eq(t, "feed down count", d["count"], 0.0)
+	eq(t, "feed down failed", d["sources_failed"], []any{"FDA announcements"})
+	eq(t, "feed down checked", d["sources_checked"], []any{"FSIS", "openFDA"})
+	eq(t, "feed down partial", d["partial"], true)
+	eq(t, "feed down note", d["note"], "no recalls matching this firm in the sources checked; absence means something only for those sources. "+
+		"openFDA's enforcement feed was last updated 2026-07-14; recalls announced since then are not in it yet. "+
+		"FDA's recall announcements (fda.gov, ahead of openFDA's enforcement feed) not checked: the feed did not answer; a recall announced since openFDA's last update may be missing.")
+	eq(t, "as_of from feed meta on a 404", item["as_of"], "2026-07-14")
+	// as_of is openFDA's meta.last_updated when newer than the newest row (C838).
+	item, d = v4.mustFetch(t, "food_recalls", `{"firm":"Reser","status":"ongoing"}`, unix("2026-07-20"))
+	eq(t, "as_of from openFDA meta", item["as_of"], "2026-07-15")
+	eq(t, "feed down: no link", at(d, "recalls", 0, "url"), nil)
+
+	// FSIS refusing us still answers from FDA, saying what is missing.
 	v2 := newPDEnv(t, false)
 	v2.fakes["www.fsis.usda.gov"].set("403")
 	item, d = v2.mustFetch(t, "food_recalls", `{"firm":"Reser"}`, unix("2026-07-20"))
-	eq(t, "fda still served", d["count"], 1.0)
+	eq(t, "fda still served", d["count"], 2.0)
 	eq(t, "failed", d["sources_failed"], []any{"FSIS"})
 	eq(t, "partial", d["partial"], true)
 	// A zero from the sources that answered is partial, not a true zero.
@@ -685,11 +751,48 @@ func TestPublicDataRecalls(t *testing.T) {
 	if at(item, "sources", 0, "cache") != "error" {
 		t.Errorf("the failed source is listed: %v", item["sources"])
 	}
-	// Both failing is a failure, refunded: no item reads count 0.
-	v2.fakes["api.fda.gov"].set("500")
-	if it, err := v2.fetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20")); code(err) != "upstream_busy" || it != nil {
+	// Every source failing is a failure, refunded: no item reads count 0.
+	v5 := newPDEnv(t, false)
+	v5.fakes["www.fsis.usda.gov"].set("403")
+	v5.fakes["api.fda.gov"].set("500")
+	v5.fakes["www.fda.gov"].set("500")
+	if it, err := v5.fetch(t, "food_recalls", `{"firm":"Nobody"}`, unix("2026-07-20")); code(err) != "upstream_busy" || it != nil {
 		t.Errorf("every source down: %v %v", it, err)
 	}
+}
+
+// TestPublicDataRecallsAnnouncementCaps: the feed is read item by item and
+// at most 200 items are kept, however many it holds; a body that is not a
+// feed is a failed source, not an empty one.
+func TestPublicDataRecallsAnnouncementCaps(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel><title>t</title>`)
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, `<item><title>Firm%03d Inc. Recalls Snack %d Due to Undeclared Sesame</title><link>http://www.fda.gov/r/%d</link><pubDate>Mon, 01 Jun 2026 00:00:00 EST</pubDate></item>`, i, i, i)
+	}
+	b.WriteString(`</channel></rss>`)
+	big := filepath.Join(t.TempDir(), "big.xml")
+	if err := os.WriteFile(big, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	abs, err := filepath.Abs(fixtures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(abs, big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := newPDEnv(t, false)
+	v.fakes["www.fda.gov"].route = func(r *http.Request) (string, int) { return rel, 200 }
+	_, d := v.mustFetch(t, "food_recalls", `{"firm":"Firm199"}`, unix("2026-07-20"))
+	eq(t, "item 200 kept", d["count"], 1.0)
+	_, d = v.mustFetch(t, "food_recalls", `{"firm":"Firm200"}`, unix("2026-07-20"))
+	eq(t, "item 201 not read", d["count"], 0.0)
+	v2 := newPDEnv(t, false)
+	v2.fakes["www.fda.gov"].set("garbage")
+	_, d = v2.mustFetch(t, "food_recalls", `{"firm":"Naia"}`, unix("2026-07-20"))
+	eq(t, "garbage failed", d["sources_failed"], []any{"FDA announcements"})
 }
 
 func TestPublicDataCongressAndFEC(t *testing.T) {

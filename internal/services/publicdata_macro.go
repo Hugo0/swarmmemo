@@ -110,7 +110,7 @@ var dsFREDSeries = &pdDataset{
 	Description: "An economic time series from FRED (Federal Reserve Bank of St. Louis), from an allowlist of public-domain US series: " + fredSeriesIDs() + ".",
 	Output:      "data: source, series, units, description, count (observations in range), latest {date, value}, observations[] (newest first: date, value), truncated, next_end_date",
 	Params: []pdParam{
-		{Name: "series_id", Kind: "string", Required: true, MaxLen: 16, Norm: pdUpper, Pattern: regexp.MustCompile(`^[A-Z0-9]{1,16}$`), Doc: "one of the allowlisted series"},
+		{Name: "series_id", Kind: "string", Required: true, Example: "GDPC1", MaxLen: 16, Norm: pdUpper, Pattern: regexp.MustCompile(`^[A-Z0-9]{1,16}$`), Doc: "one of the allowlisted series"},
 		{Name: "units", Kind: "enum", Enum: fredUnits, Norm: pdLower, Doc: "FRED transform; default the series' own (GDPC1: pca, else lin)"},
 		dateParam("start_date", "from this date (inclusive)"),
 		dateParam("end_date", "to this date (inclusive)"),
@@ -679,7 +679,7 @@ var dsCBPolicy = &pdDataset{
 	Description: "A central bank's policy rate (BIS, with the date and size of its last change; the Fed's target range from FRED; Brazil's Selic target from the BCB; Canada's target from the Bank of Canada Valet API; Israel's rate and next decision date from the Bank of Israel's PublicApi) and its next scheduled decision dates. Covers FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, or all.",
 	Output:      "data: today, what, banks {CODE: {bank, policy_rate_pct, rate_as_of, rate_effective_from, previous_rate_pct, last_change_bps, target_range_pct, selic_target_pct, next_decision, upcoming_decisions, last_scheduled_decision_in_table, calendar_source, schedule_status (scheduled, or unknown with the reason in calendar_note), rate_available, rate_may_be_stale, ...}} (one entry, or every bank for all), calendar_staleness_warning",
 	Params: []pdParam{
-		{Name: "bank", Kind: "string", Required: true, MaxLen: 64, Pattern: pdWordRE, Norm: pdTrim, Doc: "FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name (Brazil, Copom, FOMC), or all"},
+		{Name: "bank", Kind: "string", Required: true, Example: "FED", MaxLen: 64, Pattern: pdWordRE, Norm: pdTrim, Doc: "FED, ECB, BOJ, BOE, BCB, SNB, RBA, BOC, BOI, a common name (Brazil, Copom, FOMC), or all"},
 		{Name: "what", Kind: "enum", Enum: []string{"rate", "next_meeting", "both"}, Default: "both", Doc: "rate, next_meeting (no upstream request, except the Bank of Israel's live next date) or both",
 			Norm: resolveWhat},
 	},

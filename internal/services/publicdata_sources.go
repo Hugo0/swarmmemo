@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"html"
 	"io"
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // The catalogue. Parsing and normalisation follow the Pythia adapters they
@@ -40,12 +44,14 @@ var pdHostGroup = map[string]string{
 
 // pdUpstreamLimits are each upstream's own budget, across every caller:
 // politeness below the published limits (api.data.gov: 1,000 an hour a key;
-// FRED: 120 a minute; openFDA keyless: 240 a minute and 1,000 a day an IP).
+// FRED: 120 a minute; openFDA keyless: 240 a minute and 1,000 a day an IP;
+// www.fda.gov robots.txt: Crawl-Delay 30).
 var pdUpstreamLimits = map[string]pdLimit{
 	"www.ncei.noaa.gov":       {60, 5000},
 	"noaadata.apps.nsidc.org": {10, 500},
 	"www.fsis.usda.gov":       {10, 500},
 	"api.fda.gov":             {40, 900},
+	fdaWebHost:                {2, 200},
 	"api.data.gov":            {15, 20000},
 	"api.coingecko.com":       {10, 5000},
 	"api.stlouisfed.org":      {100, 50000},
@@ -367,7 +373,7 @@ var dsNOAAStation = &pdDataset{
 	Description: "Daily summaries for a GHCN weather station (NOAA NCEI): peak gust (WSFG, else WSF5), fastest 2-minute wind (WSF2), average wind, max/min temperature, precipitation.",
 	Output:      "data: station, requested_station, start_date, end_date, count, peak_gust_max_mph, peak_gust_max_date, peak_gust_max_element, max_2min_wind_max_mph, max_2min_wind_max_date, days[] (newest first: date, peak_gust_mph, peak_gust_ms, peak_gust_element (WSFG or WSF5; null when the station reports no gust), max_2min_wind_mph, max_2min_wind_ms (WSF2, a sustained wind, not a gust), avg_wind_mph, avg_wind_ms, tmax_c, tmax_f, tmin_c, tmin_f, precip_mm), truncated",
 	Params: []pdParam{
-		{Name: "station", Kind: "string", Required: true, Pattern: noaaStationRE, Norm: pdTrim,
+		{Name: "station", Kind: "string", Required: true, Example: "USW00014755", Pattern: noaaStationRE, Norm: pdTrim,
 			Doc: "GHCN id (USW00014755) or alias: KMWN, MOUNT WASHINGTON, MT WASHINGTON, KJFK, KORD, KDEN, KLAX"},
 		dateParam("start_date", "first day; default end_date minus 29 days"),
 		dateParam("end_date", "last day; default yesterday (UTC)"),
@@ -621,13 +627,24 @@ var dsSeaIce = &pdDataset{
 	NotFetchable: true, // noaadata.apps.nsidc.org robots.txt: Disallow: / (C699)
 }
 
-// --- US food recalls: FSIS and openFDA --------------------------------------
+// --- US food recalls: FSIS, openFDA and FDA's announcements -----------------
 
 const (
 	fsisHost      = "www.fsis.usda.gov"
 	fdaHost       = "api.fda.gov"
 	recallTextMax = 220
 	fdaLimit      = 25
+	// fdaWebHost serves FDA's food safety recalls RSS feed (robots.txt
+	// allows it; Crawl-Delay 30, so one copy an hour serves every firm).
+	fdaWebHost          = "www.fda.gov"
+	fdaAnnouncePath     = "/about-fda/contact-fda/stay-informed/rss-feeds/food-safety-recalls/rss.xml"
+	fdaAnnounceMax      = 200 // items read (FDA serves its newest 20)
+	fdaAnnounceFieldMax = 400 // runes of a title or link
+	recallDedupDays     = 14
+	// The row labels: every row says which source it came from.
+	recallFSIS            = "fsis"
+	recallFDAEnforcement  = "fda_enforcement"
+	recallFDAAnnouncement = "fda_announcement"
 )
 
 type fsisRecall struct {
@@ -723,6 +740,175 @@ func parseFDA(raw []byte) (any, error) {
 	return out, nil
 }
 
+// fdaAnnouncement is one item of FDA's food safety recalls feed: the
+// company's recall announcement as FDA posts it, days to weeks before the
+// recall reaches openFDA's enforcement reports (C1146, agent
+// measuredwork-743b0463). Firm, product and reason are read from the
+// headline ("<Firm> Recalls <product> Due to <reason>"); Firm is empty when
+// the headline has no recalling verb.
+type fdaAnnouncement struct {
+	Title   string `json:"t"`
+	Firm    string `json:"f,omitempty"`
+	Product string `json:"p,omitempty"`
+	Reason  string `json:"r,omitempty"`
+	Date    string `json:"d,omitempty"`
+	URL     string `json:"u,omitempty"`
+}
+
+// A headline splits at its first recalling verb, and what follows at its
+// first "due to" / "because of".
+var (
+	fdaAnnounceHeadline = regexp.MustCompile(`^(.+?)\s+(?:(?:Voluntarily|Voluntary)\s+)?(?:Recalls|Recall|Is Recalling|Issues|Announces|Expands|Initiates|Updates|Emite)\b\s*(.*)$`)
+	fdaAnnounceRecallOf = regexp.MustCompile(`(?i)^(?:(?:a|an|voluntary|nationwide|voluntarily)\s+)*recall\s+(?:of|for|to include)\s+`)
+	fdaAnnounceReason   = regexp.MustCompile(`(?i)\s+(?:due to|because of|because)\s+(?:the\s+)?`)
+)
+
+// streamFDAAnnouncements reads the feed's items as they stream, at most
+// fdaAnnounceMax of them, each field cut to fdaAnnounceFieldMax; the body
+// itself is capped by the fetch (MaxBytes).
+func streamFDAAnnouncements(r io.Reader) (any, error) {
+	dec := xml.NewDecoder(r)
+	out := []fdaAnnouncement{}
+	sawChannel := false
+	for len(out) < fdaAnnounceMax {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if se.Name.Local == "channel" {
+			sawChannel = true
+		}
+		if se.Name.Local != "item" {
+			continue
+		}
+		var it struct {
+			Title   string `xml:"title"`
+			Link    string `xml:"link"`
+			PubDate string `xml:"pubDate"`
+		}
+		if err := dec.DecodeElement(&it, &se); err != nil {
+			return nil, err
+		}
+		if a, ok := parseFDAAnnouncement(it.Title, it.Link, it.PubDate); ok {
+			out = append(out, a)
+		}
+	}
+	if !sawChannel {
+		return nil, errors.New("not an RSS channel")
+	}
+	return out, nil
+}
+
+// fdaAnnounceText is one feed field as text: entities FDA escapes twice
+// (&amp;amp;) undone, spaces collapsed, cut to fdaAnnounceFieldMax.
+func fdaAnnounceText(s string) string {
+	s = strings.Join(strings.Fields(html.UnescapeString(s)), " ")
+	if r := []rune(s); len(r) > fdaAnnounceFieldMax {
+		s = string(r[:fdaAnnounceFieldMax])
+	}
+	return s
+}
+
+func parseFDAAnnouncement(title, link, pubDate string) (fdaAnnouncement, bool) {
+	a := fdaAnnouncement{Title: fdaAnnounceText(title)}
+	if a.Title == "" {
+		return a, false
+	}
+	if m := fdaAnnounceHeadline.FindStringSubmatch(a.Title); m != nil {
+		a.Firm = strings.TrimRight(m[1], " ,")
+		rest := fdaAnnounceRecallOf.ReplaceAllString(m[2], "")
+		if loc := fdaAnnounceReason.FindStringIndex(rest); loc != nil {
+			a.Product, a.Reason = strings.TrimSpace(rest[:loc[0]]), strings.TrimSpace(rest[loc[1]:])
+		} else {
+			a.Product = strings.TrimSpace(rest)
+		}
+	}
+	pub := fdaAnnounceText(pubDate)
+	for _, layout := range []string{time.RFC1123, time.RFC1123Z, "Mon, 2 Jan 2006 15:04:05 MST", "Mon, 2 Jan 2006 15:04:05 -0700"} {
+		if t, err := time.Parse(layout, pub); err == nil {
+			a.Date = t.Format("2006-01-02") // the day on FDA's own clock
+			break
+		}
+	}
+	// Only an fda.gov page is passed on as the announcement's link, always
+	// over https.
+	if u, err := url.Parse(fdaAnnounceText(link)); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.User == nil &&
+		(strings.EqualFold(u.Host, fdaWebHost) || strings.EqualFold(u.Host, "fda.gov")) {
+		u.Scheme, u.Host = "https", fdaWebHost
+		a.URL = u.String()
+	}
+	return a, true
+}
+
+// recallWords is a name as lowercase letter-and-digit words, the way
+// openFDA's phrase search tokenises recalling_firm.
+func recallWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+}
+
+// hasPhrase reports whether words holds phrase as consecutive words.
+func hasPhrase(words, phrase []string) bool {
+	if len(phrase) == 0 {
+		return false
+	}
+	for i := 0; i+len(phrase) <= len(words); i++ {
+		if slices.Equal(words[i:i+len(phrase)], phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// recallFirmSuffix are the corporate words two spellings of one firm differ
+// by ("Naia, Inc." and "Naia Inc").
+var recallFirmSuffix = map[string]bool{"inc": true, "llc": true, "co": true, "corp": true, "corporation": true, "company": true,
+	"ltd": true, "lp": true, "the": true}
+
+func recallFirmKey(s string) []string {
+	out := []string{}
+	for _, w := range recallWords(s) {
+		if !recallFirmSuffix[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// sameRecall is the dedup rule: an announcement and an enforcement report
+// are one recall when their firms are one name, corporate suffixes aside
+// (one may extend the other: "Fresh & Ready Foods" and "Fresh & Ready Foods
+// of Ohio"), and the report's initiation date is within recallDedupDays of
+// the announcement.
+func sameRecall(enfFirm, enfDate, annFirm, annDate string) bool {
+	e, a := recallFirmKey(enfFirm), recallFirmKey(annFirm)
+	if !hasPhrase(e, a) && !hasPhrase(a, e) {
+		return false
+	}
+	return recallDayGap(enfDate, annDate) <= recallDedupDays
+}
+
+// recallDayGap is the days between two ISO dates, a large number when
+// either does not parse.
+func recallDayGap(a, b string) int {
+	ta, err1 := time.Parse("2006-01-02", a)
+	tb, err2 := time.Parse("2006-01-02", b)
+	if err1 != nil || err2 != nil {
+		return math.MaxInt32
+	}
+	d := ta.Sub(tb)
+	if d < 0 {
+		d = -d
+	}
+	return int(d / (24 * time.Hour))
+}
+
 // clip is Pythia's _clip: None when empty, else stripped and cut to limit
 // code points with an ellipsis.
 func clip(text string, limit int) *string {
@@ -756,12 +942,14 @@ func nonEmpty(s string) *string {
 
 type recallRow struct {
 	Source         string  `json:"source"`
+	SourceID       string  `json:"source_id"` // fsis, fda_enforcement or fda_announcement
 	Firm           *string `json:"firm"`
 	Product        *string `json:"product"`
 	Date           *string `json:"date"`
 	Status         *string `json:"status"`
 	Classification *string `json:"classification"`
 	Reason         *string `json:"reason"`
+	URL            *string `json:"url"` // FDA's announcement page, when FDA posted one
 }
 
 type recallsData struct {
@@ -779,11 +967,11 @@ type recallsData struct {
 var dsRecalls = &pdDataset{
 	ID: "food_recalls", SchemaVersion: 1,
 	Title:       "US food recalls",
-	Description: "US food recalls for a company from FDA openFDA food enforcement, matched by firm name, with status, class, product, reason and date. USDA FSIS (meat, poultry, egg products) is included only when its server answers us; it currently blocks our servers, so sources_failed lists FSIS.",
-	Output:      "data: firm_query, status_filter, count, total_matches, partial (true when a source failed: the counts cover sources_checked only), recalls[] (newest first: source, firm, product, date, status, classification, reason), sources_checked, sources_failed",
+	Description: "US food recalls for a company from FDA openFDA food enforcement and FDA's recall announcements feed (which carries a recall days to weeks before enforcement does), matched by firm name, with status, class, product, reason, date and FDA's announcement link. A recall in both sources (same firm, report initiated within " + strconv.Itoa(recallDedupDays) + " days of the announcement) is one row, the enforcement report's, carrying the announcement link; an announcement not reported yet is a row with status Announced and no class. USDA FSIS (meat, poultry, egg products) is included only when its server answers us; it currently blocks our servers, so sources_failed lists FSIS.",
+	Output:      "data: firm_query, status_filter, count, total_matches, partial (true when a source failed: the counts cover sources_checked only), recalls[] (newest first: source, source_id (fsis, fda_enforcement or fda_announcement), firm, product, date, status, classification, reason, url), sources_checked, sources_failed",
 	Params: []pdParam{
-		{Name: "firm", Kind: "string", Required: true, MaxLen: 100, Pattern: pdWordRE, Norm: pdTrim, Doc: "recalling company name, matched as a substring (FSIS) and a phrase (openFDA)"},
-		{Name: "status", Kind: "enum", Enum: []string{"active", "closed"}, Doc: "active (FDA: Ongoing) or closed (Completed, Terminated); default both",
+		{Name: "firm", Kind: "string", Required: true, Example: "Tyson", MaxLen: 100, Pattern: pdWordRE, Norm: pdTrim, Doc: "recalling company name, matched as a substring (FSIS) and a phrase (FDA)"},
+		{Name: "status", Kind: "enum", Enum: []string{"active", "closed"}, Doc: "active (FDA: Ongoing, and announced recalls not yet in enforcement) or closed (Completed, Terminated); default both",
 			Norm: func(s string) (string, bool) {
 				s = strings.ToLower(strings.TrimSpace(s))
 				switch s {
@@ -802,7 +990,7 @@ var dsRecalls = &pdDataset{
 		if status != "" {
 			out.StatusFilter = status
 		}
-		all := []recallRow{}
+		all, enforcement := []recallRow{}, []recallRow{}
 		var notes []string
 		if raw, err := r.fetch(ctx, pdFetch{Key: "fsis", TTL: time.Hour, Host: fsisHost, Path: "/fsis/api/recall/v/1", MaxBytes: 32 << 20,
 			Timeout: 40 * time.Second, Stream: streamFSIS}); err != nil {
@@ -822,7 +1010,7 @@ var dsRecalls = &pdDataset{
 				if (status == "active" && !rec.Active) || (status == "closed" && rec.Active) {
 					continue
 				}
-				row := recallRow{Source: "FSIS (USDA)", Firm: nonEmpty(rec.Establishment), Product: clip(rec.ProductItems, recallTextMax),
+				row := recallRow{Source: "FSIS (USDA)", SourceID: recallFSIS, Firm: nonEmpty(rec.Establishment), Product: clip(rec.ProductItems, recallTextMax),
 					Date: isoDate(rec.RecallDate), Status: sptr("Closed"), Classification: nonEmpty(rec.Classification), Reason: clip(rec.Reason, recallTextMax)}
 				if row.Firm == nil {
 					row.Firm = clip(rec.Title, 120)
@@ -875,10 +1063,68 @@ var dsRecalls = &pdDataset{
 				if (status == "active" && st != "ongoing") || (status == "closed" && st != "completed" && st != "terminated") {
 					continue
 				}
-				all = append(all, recallRow{Source: "FDA (openFDA food enforcement)", Firm: rec.Firm, Product: clip(rec.Product, recallTextMax),
-					Date: isoDate(rec.Date), Status: nonEmpty(rec.Status), Classification: nonEmpty(rec.Classification), Reason: clip(rec.Reason, recallTextMax)})
+				enforcement = append(enforcement, recallRow{Source: "FDA (openFDA food enforcement)", SourceID: recallFDAEnforcement, Firm: rec.Firm,
+					Product: clip(rec.Product, recallTextMax), Date: isoDate(rec.Date), Status: nonEmpty(rec.Status),
+					Classification: nonEmpty(rec.Classification), Reason: clip(rec.Reason, recallTextMax)})
 			}
 		}
+		// FDA's announcements feed: its newest posts, one copy for every
+		// firm. A recall enforcement already reports is that row, given the
+		// announcement's link (the nearest announcement by date); the rest
+		// are rows of their own, Announced and not yet classified.
+		annNewest, annOldest, annOnly := "", "", false
+		if raw, err := r.fetch(ctx, pdFetch{Key: "fda_announce", TTL: time.Hour, Host: fdaWebHost, Path: fdaAnnouncePath,
+			Accept: "application/rss+xml, application/xml;q=0.9", MaxBytes: 1 << 20, Timeout: 20 * time.Second, Stream: streamFDAAnnouncements}); err != nil {
+			out.SourcesFailed = append(out.SourcesFailed, "FDA announcements")
+			notes = append(notes, "FDA's recall announcements (fda.gov, ahead of openFDA's enforcement feed) not checked: the feed did not answer; a recall announced since openFDA's last update may be missing.")
+		} else {
+			list, err := unmarshalCached[[]fdaAnnouncement](raw)
+			if err != nil {
+				return nil, err
+			}
+			out.SourcesChecked = append(out.SourcesChecked, "FDA announcements")
+			phrase := recallWords(firm)
+			gap := make([]int, len(enforcement))
+			for i := range gap {
+				gap[i] = math.MaxInt32
+			}
+			for _, a := range list {
+				if a.Date != "" && a.Date > annNewest {
+					annNewest = a.Date
+				}
+				if a.Date != "" && (annOldest == "" || a.Date < annOldest) {
+					annOldest = a.Date
+				}
+				name := a.Firm
+				if name == "" {
+					name = a.Title
+				}
+				if status == "closed" || !hasPhrase(recallWords(name), phrase) {
+					continue
+				}
+				merged := false
+				for i, e := range enforcement {
+					if !sameRecall(deref(e.Firm), deref(e.Date), a.Firm, a.Date) {
+						continue
+					}
+					merged = true
+					if g := recallDayGap(deref(e.Date), a.Date); a.URL != "" && g < gap[i] {
+						gap[i], enforcement[i].URL = g, sptr(a.URL)
+					}
+				}
+				if merged {
+					continue
+				}
+				row := recallRow{Source: "FDA (recall announcement)", SourceID: recallFDAAnnouncement, Firm: nonEmpty(a.Firm),
+					Product: clip(a.Product, recallTextMax), Date: nonEmpty(a.Date), Status: sptr("Announced"), Reason: clip(a.Reason, recallTextMax), URL: nonEmpty(a.URL)}
+				if row.Product == nil {
+					row.Product = clip(a.Title, recallTextMax)
+				}
+				all = append(all, row)
+				annOnly = true
+			}
+		}
+		all = append(all, enforcement...)
 		if len(out.SourcesChecked) == 0 {
 			return nil, pdFail("upstream_busy", "every_source_failed")
 		}
@@ -887,17 +1133,26 @@ var dsRecalls = &pdDataset{
 		out.Partial = len(out.SourcesFailed) > 0
 		out.Recalls = all[:min(len(all), int(intOr(p, "limit", 10)))]
 		out.Count = len(out.Recalls)
-		// as_of is the newer of the newest recall and openFDA's own
-		// last_updated, so a lagging feed shows instead of a null.
+		// as_of is the newest of the newest recall, openFDA's own
+		// last_updated and FDA's newest announcement, so a lagging feed
+		// shows instead of a null.
 		if len(out.Recalls) > 0 && out.Recalls[0].Date != nil {
 			r.asOf = *out.Recalls[0].Date
 		}
-		if fdaUpdated > r.asOf {
-			r.asOf = fdaUpdated
+		for _, d := range []string{fdaUpdated, annNewest} {
+			if d > r.asOf {
+				r.asOf = d
+			}
+		}
+		if annOnly {
+			notes = append([]string{"Rows with source_id fda_announcement are FDA recall announcements not yet in openFDA's enforcement feed: status Announced, no classification yet."}, notes...)
 		}
 		if len(all) == 0 {
 			none := "no recalls matching this firm in the sources checked; absence means something only for those sources"
-			if fdaUpdated != "" {
+			switch {
+			case fdaUpdated != "" && annOldest != "":
+				none += ". openFDA's enforcement feed was last updated " + fdaUpdated + "; FDA's recall announcements since " + annOldest + " were checked too."
+			case fdaUpdated != "":
 				none += ". openFDA's enforcement feed was last updated " + fdaUpdated + "; recalls announced since then are not in it yet."
 			}
 			notes = append([]string{none}, notes...)
@@ -905,8 +1160,8 @@ var dsRecalls = &pdDataset{
 		out.Note = strings.Join(notes, " ")
 		return out, nil
 	},
-	Source: "USDA Food Safety and Inspection Service; US Food and Drug Administration (openFDA)", Hosts: []string{fsisHost, fdaHost},
-	Licence: "US government works, public domain (openFDA: CC0)", Attribution: "USDA FSIS recall API; openFDA food enforcement reports",
+	Source: "USDA Food Safety and Inspection Service; US Food and Drug Administration (openFDA; fda.gov recall announcements)", Hosts: []string{fsisHost, fdaHost, fdaWebHost},
+	Licence: "US government works, public domain (openFDA: CC0)", Attribution: "USDA FSIS recall API; openFDA food enforcement reports; FDA food safety recalls RSS feed",
 	TermsURL: "https://open.fda.gov/terms/", TermsStatus: "public domain (US government)",
 	TTL: time.Hour, Price: 1, Untrusted: true,
 }
@@ -1001,7 +1256,7 @@ var dsCongressBills = &pdDataset{
 	Description: "Recently active bills in a Congress whose title or latest action contains every query word (Congress.gov has no full-text search: the 250 most recently updated bills are scanned), with the latest action and its date.",
 	Output:      "data: query, congress, count (matches), scanned, bills[] (newest action first: bill, title, latest_action, latest_action_date, congress)",
 	Params: []pdParam{
-		{Name: "query", Kind: "string", Required: true, MaxLen: 200, Pattern: pdWordRE, Norm: pdTrim, Doc: "words that must all appear in the title or latest action"},
+		{Name: "query", Kind: "string", Required: true, Example: "appropriations", MaxLen: 200, Pattern: pdWordRE, Norm: pdTrim, Doc: "words that must all appear in the title or latest action"},
 		{Name: "congress", Kind: "int", Min: 1, Max: 999, Default: "the current Congress", Doc: "Congress number, e.g. 119"},
 		limitParam(8, 50, false),
 	},
@@ -1149,7 +1404,7 @@ var dsFECTotals = &pdDataset{
 	Description: "A US federal candidate's campaign-finance top line from the FEC: receipts, disbursements, cash on hand and debts, for the latest or a given two-year cycle.",
 	Output:      "data: candidate_name, candidate_id, cycle, receipts, disbursements, cash_on_hand, debts (US dollars), count (1 found, 0 not)",
 	Params: []pdParam{
-		{Name: "candidate", Kind: "string", MaxLen: 100, Pattern: fecNameRE, Norm: pdTrim, Doc: "candidate name (the best FEC match is used); or give candidate_id"},
+		{Name: "candidate", Kind: "string", Example: "Sanders", MaxLen: 100, Pattern: fecNameRE, Norm: pdTrim, Doc: "candidate name (the best FEC match is used); or give candidate_id"},
 		{Name: "candidate_id", Kind: "string", Pattern: fecIDRE, Norm: pdUpper, Doc: "FEC candidate id, e.g. H2TX30123"},
 		{Name: "cycle", Kind: "int", Min: 1976, Max: 2100, Doc: "even election cycle year; default the latest"},
 	},
@@ -1239,7 +1494,7 @@ var dsCryptoPrice = &pdDataset{
 		// C1135: CoinGecko ids carry '_' (hive_dollar), may start with '-'
 		// (-3) and run past 64 bytes (tokenized ETFs). The id goes upstream
 		// only as an escaped ids= query value.
-		{Name: "coin_id", Kind: "string", Required: true, MaxLen: 128, Pattern: regexp.MustCompile(`^[a-z0-9_-]{1,128}$`), Norm: pdLower, Doc: "CoinGecko coin id, e.g. bitcoin or hive_dollar"},
+		{Name: "coin_id", Kind: "string", Required: true, Example: "bitcoin", MaxLen: 128, Pattern: regexp.MustCompile(`^[a-z0-9_-]{1,128}$`), Norm: pdLower, Doc: "CoinGecko coin id, e.g. bitcoin or hive_dollar"},
 		{Name: "vs_currency", Kind: "string", MaxLen: 8, Pattern: regexp.MustCompile(`^[a-z]{2,8}$`), Norm: pdLower, Default: "usd", Doc: "quote currency"},
 	},
 	Validate: func(p *pdParams, _ time.Time) bool {

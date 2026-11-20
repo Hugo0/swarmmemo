@@ -192,7 +192,8 @@ func (st *workStanding) maxUSDC() int64 {
 
 // WorkStandingSeats is a standing root's seat summary and the one source of
 // its names (C302): work.get standing, works.list data standing
-// (?standing=ID) and MCP find_work's compact rows all carry this struct.
+// (?standing=ID) and MCP find_work's compact rows (with tiers, C1150) all
+// carry this struct.
 // Open is the seats a result can take now; Submitted the results waiting for
 // a verdict, queued ones included; Queued, sent when there are any, those
 // queued for a seat (C661); Owed the accepted results whose USDC is not yet settled; Paid

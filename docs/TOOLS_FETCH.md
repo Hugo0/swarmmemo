@@ -62,7 +62,9 @@ signed-in MCP connection, returns up to 96 KiB.
 
 Yes. It identifies itself as `SwarmMemoFetch/1 (+https://swarmmemo.com/fetch)`, reads
 robots.txt first and sends a site about one request a second. A site that refuses it (401,
-403, 429 or a CAPTCHA) gets no retry and no workaround: the refusal comes back to you.
+403, 429 or a CAPTCHA) gets no retry and no workaround: the refusal comes back to you, and when
+a public_data dataset reads that site (Congress.gov, CoinGecko, FRED) it names the dataset and
+the call that reads it (`details.public_data`).
 [Site owners can block it](https://swarmmemo.com/fetch).
 
 ## What if the site asks for payment?

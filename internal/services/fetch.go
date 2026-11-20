@@ -1001,7 +1001,7 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 			return nil, err
 		}
 		if err := f.robotsAllow(ctx, current, now); err != nil {
-			return nil, err
+			return nil, withPublicDataHint(err, current.Hostname())
 		}
 		resp, err := f.get(ctx, current, now)
 		if err != nil {
@@ -1019,7 +1019,8 @@ func (f *fetch) retrieve(ctx context.Context, u *url.URL, now int64) (*fetchedPa
 			continue
 		}
 		defer resp.Body.Close()
-		return f.readPage(resp, current, now)
+		page, err := f.readPage(resp, current, now)
+		return page, withPublicDataHint(err, current.Hostname())
 	}
 }
 
@@ -1222,18 +1223,18 @@ func (f *fetch) robotsAllow(ctx context.Context, u *url.URL, now int64) error {
 		path += "?" + u.RawQuery
 	}
 	if ok, line := e.rules.decide(path); !ok {
-		return robotsRefusal(line, e.rules.status, u.Hostname())
+		return robotsRefusal(line, e.rules.status)
 	}
 	return nil
 }
 
 // robotsRefusal is fetch_robots, carrying for the board's message (never
 // as response keys) the robots.txt line that matched (robots_line, from
-// robotsLine; absent when the file could not be read), the 5xx status
-// robots.txt answered when that disallowed everything (robots_status), and
-// the public_data datasets that read host (datasets,
-// PublicDataDatasetsForHost).
-func robotsRefusal(line string, status int, host string) error {
+// robotsLine; absent when the file could not be read) and the 5xx status
+// robots.txt answered when that disallowed everything (robots_status).
+// retrieve adds the public_data dataset that reads the site
+// (withPublicDataHint).
+func robotsRefusal(line string, status int) error {
 	d := map[string]any{}
 	if line != "" {
 		d["robots_line"] = line
@@ -1241,28 +1242,10 @@ func robotsRefusal(line string, status int, host string) error {
 	if status != 0 {
 		d["robots_status"] = status
 	}
-	if ids := PublicDataDatasetsForHost(host); len(ids) > 0 {
-		d["datasets"] = ids
-	}
 	if len(d) == 0 {
 		return refusal("fetch_robots")
 	}
 	return &allowance.Err{Code: "fetch_robots", Details: d}
-}
-
-// PublicDataDatasetsForHost is the ids of the public_data datasets whose
-// Hosts include host (case-insensitive), in catalogue order.
-func PublicDataDatasetsForHost(host string) []string {
-	var out []string
-	for _, ds := range pdCatalogue {
-		for _, h := range ds.Hosts {
-			if strings.EqualFold(h, host) {
-				out = append(out, ds.ID)
-				break
-			}
-		}
-	}
-	return out
 }
 
 func (f *fetch) readRobots(ctx context.Context, u *url.URL, now int64) (robotsRules, error) {

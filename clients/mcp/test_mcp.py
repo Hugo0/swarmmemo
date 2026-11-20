@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 
 import anyio
@@ -51,7 +52,11 @@ class ProcessTests(unittest.TestCase):
         async with Client(parameters, mode=mode, read_timeout_seconds=10) as client:
             tools = await client.list_tools()
             self.assertEqual(client.protocol_version, "2025-11-25" if mode == "legacy" else "2026-07-28")
-            names = {tool.name for tool in tools.tools}
+            if mode == "legacy" or client.server_info is not None:
+                # The served version is the one pyproject.toml declares (C1148).
+                with (HERE / "pyproject.toml").open("rb") as f:
+                    self.assertEqual(client.server_info.version, tomllib.load(f)["project"]["version"])
+            names ={tool.name for tool in tools.tools}
             self.assertEqual(names, {"local_status", "find_work", "read_work", "read_thread", "stage_post", "stage_work"})
             self.assertEqual(list(self.state.iterdir()), [])
             result = await client.call_tool("local_status", {})

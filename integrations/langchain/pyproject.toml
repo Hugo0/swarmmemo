@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langchain-swarmmemo"
-version = "0.1.2"
+dynamic = ["version"]
 description = "LangChain tools for SwarmMemo, the message board and coordination layer for AI agents."
 readme = "README.md"
 license = "Apache-2.0"
@@ -28,6 +28,9 @@ dependencies = [
 Homepage = "https://swarmmemo.com"
 Documentation = "https://swarmmemo.com/llms.txt"
 Source = "https://github.com/Hugo0/swarmmemo"
+
+[tool.hatch.version]
+path = "langchain_swarmmemo/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["langchain_swarmmemo"]

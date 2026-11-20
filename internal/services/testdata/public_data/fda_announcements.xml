@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0" xml:base="http://www.fda.gov/">
+  <channel>
+    <title>FDA Food Safety Recalls RSS Feed</title>
+    <link>http://www.fda.gov/</link>
+    <description/>
+    <language>en</language>
+    <!-- A hand-written sample of the feed's shape (C1146), not a download. -->
+    <item>
+  <title>Naia, Inc. Recalls Chocolate Banana Bar Sorbetto Because of Undeclared Milk, Eggs, and Nuts </title>
+  <link>http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/naia-inc-recalls-chocolate-banana-bar-sorbetto-because-undeclared-milk-eggs-and-nuts</link>
+  <description>Naia, Inc. of Example City, CA, is recalling Chocolate Banana Bar Sorbetto because it may contain undeclared milk, eggs and nuts.</description>
+  <pubDate>Thu, 16 Jul 2026 00:00:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="true">http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/naia-inc-recalls-chocolate-banana-bar-sorbetto-because-undeclared-milk-eggs-and-nuts</guid>
+    </item>
+<item>
+  <title>Fresh &amp; Ready Foods LLC Issues Allergy Alert on Undeclared Milk in Biscuit Sandwiches</title>
+  <link>http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/fresh-ready-foods-llc-issues-allergy-alert</link>
+  <description>Example, TX – 07/14/2026 – Fresh &amp;amp; Ready Foods LLC is recalling Sausage, Egg &amp;amp; Cheese Biscuit Sandwiches.</description>
+  <pubDate>Tue, 14 Jul 2026 18:30:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="true">http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/fresh-ready-foods-llc-issues-allergy-alert</guid>
+    </item>
+<item>
+  <title>Reser&#39;s Fine Foods, Inc. Recalls Potato Salad Due to Possible Listeria Monocytogenes Contamination</title>
+  <link>http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/resers-fine-foods-inc-recalls-potato-salad</link>
+  <description>Reser's Fine Foods, Inc. is recalling 16 oz tubs of potato salad.</description>
+  <pubDate>Mon, 13 Jul 2026 00:00:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="true">http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/resers-fine-foods-inc-recalls-potato-salad</guid>
+    </item>
+<item>
+  <title>Medical Device Correction Update  Example Pump (Model X1)</title>
+  <link>http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/medical-device-correction-update-example-pump</link>
+  <description>An update on a device correction.</description>
+  <pubDate>Fri, 10 Jul 2026 00:00:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="true">http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/medical-device-correction-update-example-pump</guid>
+    </item>
+<item>
+  <title>Offsite Snacks Recalls Granola Because of Undeclared Peanuts</title>
+  <link>https://offsite.example/recall</link>
+  <description>A link that is not an fda.gov page.</description>
+  <pubDate>Wed, 24 Jun 2026 00:00:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="false">offsite-1</guid>
+    </item>
+<item>
+  <title>Reser&#39;s Fine Foods Recalls Bean Dip Due to Undeclared Soy</title>
+  <link>http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/resers-fine-foods-recalls-bean-dip</link>
+  <description>Reser's Fine Foods is recalling bean dip.</description>
+  <pubDate>Mon, 01 Jun 2026 00:00:00 EST</pubDate>
+    <dc:creator>FDA</dc:creator>
+    <guid isPermaLink="true">http://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/resers-fine-foods-recalls-bean-dip</guid>
+    </item>
+  </channel>
+</rss>

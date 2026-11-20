@@ -51,6 +51,9 @@ type pdParam struct {
 	Required bool
 	Default  string // documented default
 	Doc      string
+	// Example is a value that validates, set on the parameters a request
+	// needs: the call a fetch refusal names (publicDataCall) sends it.
+	Example  string
 	MaxLen   int            // string: bytes (publicDataStringMax when 0)
 	Pattern  *regexp.Regexp // string: after Norm
 	Enum     []string       // enum: canonical values

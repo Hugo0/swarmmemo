@@ -1,6 +1,7 @@
 package services_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"swarmmemo/internal/allowance"
 	"swarmmemo/internal/services"
@@ -56,13 +58,109 @@ func TestPublicDataDatasetsForHost(t *testing.T) {
 	if ids := services.PublicDataDatasetsForHost("WWW.NCEI.NOAA.GOV"); !slices.Contains(ids, "noaa_station_daily") {
 		t.Fatalf("case: %v", ids)
 	}
-	if ids := services.PublicDataDatasetsForHost("site.test"); len(ids) != 0 {
-		t.Fatalf("unknown host: %v", ids)
+	// The site a dataset host is on, and its other hosts, name it too
+	// (C1147): congress.gov's pages, CoinGecko's API and website.
+	for host, want := range map[string]string{
+		"congress.gov": "congress_bills", "www.congress.gov": "congress_bills", "api.congress.gov": "congress_bills",
+		"api.coingecko.com": "crypto_spot_price", "www.coingecko.com": "crypto_spot_price", "coingecko.com.": "crypto_spot_price",
+		"fred.stlouisfed.org": "fred_series",
+	} {
+		if ids := services.PublicDataDatasetsForHost(host); len(ids) == 0 || ids[0] != want {
+			t.Fatalf("%s: %v, want %s first", host, ids, want)
+		}
+	}
+	for _, host := range []string{"site.test", "gov", "evil.gov", "congress.gov.evil.test", "notcongress.gov", "coingecko.org"} {
+		if ids := services.PublicDataDatasetsForHost(host); len(ids) != 0 {
+			t.Fatalf("unrelated host %s: %v", host, ids)
+		}
 	}
 	for _, h := range services.PublicDataHosts() {
 		if len(services.PublicDataDatasetsForHost(h)) == 0 {
 			t.Fatalf("catalogue host %s names no dataset", h)
 		}
+		// A host's site is never a bare public suffix (co.uk, gov.br).
+		if site := h[strings.IndexByte(h, '.')+1:]; strings.Count(h, ".") >= 2 && strings.Count(site, ".") == 1 {
+			switch site[:strings.IndexByte(site, '.')] {
+			case "co", "com", "gov", "org", "net", "ac", "edu":
+				t.Fatalf("catalogue host %s: its site %s is a public suffix", h, site)
+			}
+		}
+	}
+}
+
+// TestPublicDataCallsValidate: the call a refusal names for each dataset
+// (C1147) is one public_data.fetch accepts as sent.
+func TestPublicDataCallsValidate(t *testing.T) {
+	for _, id := range services.PublicDataIDsForTest() {
+		call := services.PublicDataCallForTest(id)
+		args, ok := strings.CutPrefix(call, "public_data.fetch ")
+		if !ok {
+			t.Fatalf("%s: %q", id, call)
+		}
+		ids, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(args), time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC).Unix())
+		if err != nil || len(ids) != 1 || ids[0] != id {
+			t.Fatalf("%s: %s: %v %v", id, call, ids, err)
+		}
+	}
+}
+
+// TestFetchRefusalNamesPublicData: a site refusal on a site public_data
+// reads carries details.public_data {dataset, call}, also from the cache; an
+// unrelated host carries nothing (C1147).
+func TestFetchRefusalNamesPublicData(t *testing.T) {
+	s := newSite(t, false, map[string]http.HandlerFunc{
+		"/robots.txt": func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "User-agent: *\nDisallow: /api/v3/coins/\n")
+		},
+		"/bill/119th-congress/house-bill/1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `<html><head><title>Just a moment...</title></head><body><script src="/cdn-cgi/challenge-platform/x.js"></script></body></html>`)
+		},
+		"/forbidden": func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no bots", http.StatusForbidden) },
+		"/slow-down": func(w http.ResponseWriter, r *http.Request) { http.Error(w, "later", http.StatusTooManyRequests) },
+		"/gone":      func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) },
+	})
+	r := newFetchRig(t, s, fetchOpts{hosts: map[string][]net.IP{
+		"api.coingecko.com": {publicIP}, "www.congress.gov": {publicIP}, "site.test": {publicIP},
+	}})
+	refused := func(url, code string) map[string]any {
+		t.Helper()
+		_, err := r.fetch("alice", noScreen(url))
+		var ae *allowance.Err
+		if !errors.As(err, &ae) || ae.Code != code {
+			t.Fatalf("%s: got %v, want %s", url, err, code)
+		}
+		d, _ := ae.Details.(map[string]any)
+		return d
+	}
+	hint := func(d map[string]any) (string, string) {
+		h, _ := d["public_data"].(map[string]any)
+		ds, _ := h["dataset"].(string)
+		call, _ := h["call"].(string)
+		return ds, call
+	}
+	for i := 0; i < 2; i++ { // the second answer is the cached refusal
+		d := refused("http://api.coingecko.com/api/v3/coins/bitcoin", "fetch_robots")
+		if ds, call := hint(d); ds != "crypto_spot_price" || call != `public_data.fetch {"dataset":"crypto_spot_price","params":{"coin_id":"bitcoin"}}` || d["robots_line"] != "Disallow: /api/v3/coins/" {
+			t.Fatalf("coingecko try %d: %#v", i, d)
+		}
+	}
+	d := refused("http://www.congress.gov/bill/119th-congress/house-bill/1", "fetch_captcha")
+	if ds, call := hint(d); ds != "congress_bills" || !strings.HasPrefix(call, `public_data.fetch {"dataset":"congress_bills","params":{"query":`) {
+		t.Fatalf("congress: %#v", d)
+	}
+	for _, c := range []struct{ path, code string }{{"/forbidden", "fetch_blocked"}, {"/slow-down", "fetch_site_rate_limited"}} {
+		if ds, _ := hint(refused("http://api.coingecko.com"+c.path, c.code)); ds != "crypto_spot_price" {
+			t.Fatalf("%s: no hint", c.code)
+		}
+		if d := refused("http://site.test"+c.path, c.code); d != nil {
+			t.Fatalf("unrelated %s: %#v", c.code, d)
+		}
+	}
+	// Not a site refusal: no hint.
+	if d := refused("http://api.coingecko.com/gone", "fetch_not_found"); d != nil {
+		t.Fatalf("not found: %#v", d)
 	}
 }
 
@@ -82,7 +180,7 @@ func TestFetchRobotsCarriesTheLine(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 		d, _ := ae.Details.(map[string]any)
-		if d["robots_line"] != "Disallow: /private" || d["datasets"] != nil {
+		if d["robots_line"] != "Disallow: /private" || d["public_data"] != nil {
 			t.Fatalf("try %d details: %#v", i, ae.Details)
 		}
 	}
@@ -101,7 +199,7 @@ func TestFetchRobotsNamesTheDataset(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	d, _ := ae.Details.(map[string]any)
-	if ids, _ := d["datasets"].([]string); d["robots_line"] != "Disallow: /data/" || !slices.Contains(ids, "noaa_station_daily") {
+	if h, _ := d["public_data"].(map[string]any); d["robots_line"] != "Disallow: /data/" || h["dataset"] != "noaa_station_daily" {
 		t.Fatalf("details: %#v", ae.Details)
 	}
 }

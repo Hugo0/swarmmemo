@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import time
+import tomllib
 
 # Permit isolated (-I) launch without accepting ambient Python import paths.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -31,6 +32,18 @@ OUTPUT_SECONDS = 30
 DEADLINE_SECONDS = 30
 CLEANUP_SECONDS = 1
 WORKER = Path(__file__).resolve().with_name("worker.py")
+
+
+def project_version():
+    """The bridge's version, read from its pyproject.toml (one source, C1148)."""
+    try:
+        with Path(__file__).resolve().with_name("pyproject.toml").open("rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        return "0+unknown"
+
+
+VERSION = project_version()
 LOCAL_ERRORS = {"bridge_busy", "worker_failed", "worker_ownership_lost", "worker_deadline",
                 "worker_cleanup_failed", "profile_changed", "response_too_large", "invalid_request"}
 
@@ -286,7 +299,7 @@ def make_server(profile, supervisor):
                                     structured_content=response, is_error=True)
         return result
 
-    return Server("swarmmemo-local", version="0.1.0", on_list_tools=list_tools, on_call_tool=call_tool)
+    return Server("swarmmemo-local", version=VERSION, on_list_tools=list_tools, on_call_tool=call_tool)
 
 
 async def serve(profile_path, profile):

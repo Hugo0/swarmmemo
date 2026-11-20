@@ -139,6 +139,18 @@ func PublicDataHosts() []string {
 	return out
 }
 
+// PublicDataIDsForTest is every dataset id, in catalogue order.
+func PublicDataIDsForTest() []string {
+	var out []string
+	for _, ds := range pdCatalogue {
+		out = append(out, ds.ID)
+	}
+	return out
+}
+
+// PublicDataCallForTest is the call a fetch refusal names for dataset id.
+func PublicDataCallForTest(id string) string { return publicDataCall(pdByID[id]) }
+
 // PublicDataParseForTest parses fetch or bulk args: each request's dataset
 // and its parameters as resolved.
 func PublicDataParseForTest(method string, args json.RawMessage, now int64) ([]string, []map[string]any, error) {

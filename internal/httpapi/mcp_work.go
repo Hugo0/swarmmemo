@@ -464,14 +464,23 @@ type compactWork struct {
 	Deadline           int64                         `json:"deadline"`
 	Claimable          bool                          `json:"claimable"`
 	// Standing is a standing task's seat summary, the struct read_work's
-	// standing starts with (one set of names, C302); StandingID the
-	// standing task a result opened this task on.
-	Standing   *board.WorkStandingSeats `json:"standing,omitempty"`
-	StandingID string                   `json:"standing_id,omitempty"`
+	// standing starts with (one set of names, C302), and its tiers;
+	// StandingID the standing task a result opened this task on.
+	Standing   *compactWorkStanding `json:"standing,omitempty"`
+	StandingID string               `json:"standing_id,omitempty"`
 	// You is the caller's own limit on a standing task and when its next
 	// claim opens (C1065), as read_work gives it.
 	You *board.WorkYou `json:"you,omitempty"`
 	URL string         `json:"url"`
+}
+
+// compactWorkStanding is a compact row's standing: the seats and the tiers
+// one result may be paid (name, credits, usdc when it pays USDC), as
+// read_work's standing gives them, so a worker sees a USDC tier without a
+// second read (C1150). At most board.WorkStandingTiersMax tiers.
+type compactWorkStanding struct {
+	board.WorkStandingSeats
+	Tiers []board.WorkStandingTier `json:"tiers,omitempty"`
 }
 
 type compactWorkUSDC struct {
@@ -500,8 +509,7 @@ func compactWorks(result *board.Result, origin string) error {
 	for _, w := range works {
 		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, EligibilitySummary: w.EligibilitySummary, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, You: w.You, URL: origin + "/work/" + w.ID}
 		if w.Standing != nil {
-			seats := w.Standing.WorkStandingSeats
-			row.Standing = &seats
+			row.Standing = &compactWorkStanding{WorkStandingSeats: w.Standing.WorkStandingSeats, Tiers: w.Standing.Tiers}
 		}
 		if w.Reward != nil {
 			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, State: w.Reward.State}

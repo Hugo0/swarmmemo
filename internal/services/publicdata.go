@@ -154,6 +154,7 @@ type publicData struct {
 	classifier allowance.Classifier
 	client     *http.Client
 	hosts      map[string]bool // host:port every request may connect to
+	ipv4       map[string]bool // host:port reached over IPv4 only (pdIPv4Hosts)
 
 	mu       sync.Mutex
 	callers  map[string]*pdWindow
@@ -163,16 +164,22 @@ type publicData struct {
 }
 
 func newPublicData(d Deps) Provider {
-	p := &publicData{cfg: d.PublicData, db: d.DB, classifier: d.Classifier, hosts: map[string]bool{},
+	p := &publicData{cfg: d.PublicData, db: d.DB, classifier: d.Classifier, hosts: map[string]bool{}, ipv4: map[string]bool{},
 		callers: map[string]*pdWindow{}, upstream: map[string]*pdWindow{}}
 	for _, ds := range pdCatalogue {
 		for _, h := range ds.Hosts {
 			p.hosts[p.dialAddr(h)] = true
+			p.ipv4[p.dialAddr(h)] = pdIPv4Hosts[h]
 		}
 	}
 	p.client = p.newClient()
 	return p
 }
+
+// pdIPv4Hosts are upstreams whose CDN refuses our servers over IPv6 and
+// answers over IPv4 (www.fda.gov: 403 from our IPv6 range, 200 over IPv4,
+// 2026-11-20).
+var pdIPv4Hosts = map[string]bool{fdaWebHost: true}
 
 // dialAddr is the host:port a request to upstream host h connects to.
 func (p *publicData) dialAddr(h string) string {
@@ -203,6 +210,9 @@ func (p *publicData) newClient() *http.Client {
 				if !p.hosts[addr] {
 					return nil, errNotCatalogueHost
 				}
+				if p.ipv4[addr] {
+					network = "tcp4"
+				}
 				return dial(ctx, network, addr)
 			},
 			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
@@ -229,7 +239,7 @@ CREATE TABLE IF NOT EXISTS public_data_cache (
 func (*publicData) Describe() Descriptor {
 	return Descriptor{
 		ID: "public_data",
-		Summary: "Public datasets from fixed upstreams (NOAA, NSIDC, FSIS, openFDA, Congress.gov, FEC, CoinGecko, FRED, BIS, BCB, ECB, Federal Reserve nowcasts, Arena), normalised, versioned and cached. " +
+		Summary: "Public datasets from fixed upstreams (NOAA, NSIDC, FSIS, FDA, Congress.gov, FEC, CoinGecko, FRED, BIS, BCB, ECB, Federal Reserve nowcasts, Arena), normalised, versioned and cached. " +
 			"service.read method datasets lists the catalogue; fetch args: {\"dataset\":ID,\"params\":{...}}; bulk args: {\"requests\":[{\"dataset\":ID,\"params\":{...}},...]} (at most " + itoa(PublicDataBulkMax) + ").",
 		Title: "Public data", Topic: "Search and data",
 		Line: "Fetch public datasets (weather, sea ice, recalls, bills, election finance, prices, rates, nowcasts, AI rankings) from official sources, normalised and cached.",

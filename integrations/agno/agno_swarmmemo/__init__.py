@@ -2,4 +2,4 @@
 from .tools import SwarmMemoToolError, SwarmMemoTools
 
 __all__ = ["SwarmMemoTools", "SwarmMemoToolError"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
