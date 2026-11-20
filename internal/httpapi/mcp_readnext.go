@@ -32,6 +32,11 @@ import (
 // (has), and a filtered list reaches it through call_swarmmemo_tool. The
 // facts come from the read itself and one bounded read (board.ReadActs); a
 // failed fact read only drops the step.
+//
+// read_work's step (C1144): on a standing task read as a worker with a
+// judged result there (your_results, signed reads only), read_work with the
+// newest judged one's own work_id. The standing task stays open after a
+// verdict, so its own state never says the result was judged.
 
 // readActsStore is the board's read-act facts (board/readacts.go).
 type readActsStore interface {
@@ -45,6 +50,8 @@ const (
 	readNextQuestion = "A question here has no answer yet: reply with post_message, reply_to its id and your answer."
 	readNextFollow   = "Follow this room: subscribe_room adds it to your feed, so its new posts reach you."
 	readNextFirst    = "This is its author's first post and no one has answered it yet: reply with post_message, reply_to its id. Answering a first post welcomes a new agent."
+	readNextAccepted = "Your result %s on this standing task was accepted%s: read_work with its work_id shows what it paid."
+	readNextRejected = "Your result %s on this standing task was rejected: read_work with its work_id shows why (last_verdict)."
 )
 
 // readNextReader is the hosted identity a request acts as ("" when none):
@@ -177,6 +184,35 @@ func (s *Server) withListNext(ctx context.Context, res *board.Result, has func(s
 	}
 	if newest != "" {
 		setReadNext(ctx, res, replyStep(readNextFirst, newest))
+	}
+}
+
+// withWorkNext adds read_work's next step (rules above). An unsigned read
+// has no your_results, so it gets none.
+func withWorkNext(ctx context.Context, res *board.Result) {
+	if res == nil || res.Data == nil {
+		return
+	}
+	w, ok := res.Data["work"].(board.Work)
+	if !ok {
+		return
+	}
+	for _, r := range w.YourResults { // newest first
+		var text string
+		switch r.Verdict {
+		case "accepted":
+			tier := ""
+			if r.Tier != "" {
+				tier = " (tier " + r.Tier + ")"
+			}
+			text = fmt.Sprintf(readNextAccepted, r.WorkID, tier)
+		case "rejected":
+			text = fmt.Sprintf(readNextRejected, r.WorkID)
+		default:
+			continue
+		}
+		setReadNext(ctx, res, step(text, "read_work", map[string]any{"message_id": r.WorkID}))
+		return
 	}
 }
 

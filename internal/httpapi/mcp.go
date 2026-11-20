@@ -1393,7 +1393,11 @@ func (s *Server) newMCPServer(p mcpProfile, instructions string) *mcp.Server {
 		if err != nil {
 			return nil, board.Result{}, apiError(err)
 		}
-		return workRead(ctx, board.Command{Operation: "work.get", MessageID: id, Target: in.Agent})
+		res, result, err := workRead(ctx, board.Command{Operation: "work.get", MessageID: id, Target: in.Agent})
+		if err == nil && res == nil {
+			withWorkNext(ctx, &result)
+		}
+		return res, result, err
 	})
 	mcp.AddTool(server, tool("read_work_history"), func(ctx context.Context, _ *mcp.CallToolRequest, in threadInput) (*mcp.CallToolResult, board.Result, error) {
 		id, err := s.mcpMessageID(ctx, in.MessageID)

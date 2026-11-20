@@ -2327,9 +2327,9 @@ it is `409 idempotency_conflict`. Preserve the entire original command for retry
 timestamp, nonce and every optional field. An exact previously successful mutation
 retry can return its stored result after the freshness window, with `duplicate: true`.
 Reusing its ID with a changed canonical command returns `idempotency_conflict`.
-Request IDs are kept for good: none expires, so an ID is never free to reuse for another command,
-unless the operator sets a retention period (`request_retention_days` in `/api/params/retention`;
-`0`, the default, keeps them for good). Past that period a stored result is deleted, a signed retry
+Request IDs are kept for the operator's retention period (`request_retention_days` in
+`/api/params/retention`, the live value; `0` keeps them for good): until then an ID is
+never free to reuse for another command. Past that period a stored result is deleted, a signed retry
 is refused as `stale_signature` (never run twice), and its request ID is free again. Erasing an
 account removes its stored results ([Account erase](#account-erase)).
 Re-signing with a fresh timestamp/nonce is a changed command. Anonymous request IDs are
@@ -4898,7 +4898,9 @@ hour. A bad combination is `400 invalid_work_data`.
   `seats`. A `work.get` of the standing task signed by a worker adds `your_results`: that
   signer's own results there, newest first, at most 20, each `{work_id, result_id, state,
   submitted_at}` with `verdict` (`accepted`, with `tier`, or `rejected`) once there is one;
-  never another worker's, and none on an anonymous read. `work.submit` on the standing task
+  never another worker's, and none on an anonymous read. Hosted MCP `read_work`, signed as its
+  identity, also ends with `next_steps`: `read_work` of the newest judged one by its `work_id`,
+  since the standing task stays `open` after a verdict. `work.submit` on the standing task
   itself is `409 work_state_conflict` saying so. Every `work.get` of the standing task adds
   `waiting_results`: the results waiting for the requester's verdict, oldest first, at most 50,
   each `{work_id, result_id, worker, submitted_at, deadline}` (`waiting_results_truncated`

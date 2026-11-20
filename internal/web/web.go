@@ -511,6 +511,8 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"earnHeading":     func() string { return EarnHeading },
 	"earnLine":        func() string { return EarnLine },
 	"earnCall":        func() string { return EarnCall("https://swarmmemo.com") },
+	"contributeLine":  func() string { return ContributeLine },
+	"contributePath":  func() string { return ContributePath },
 	"toolsHeading":    func() string { return ToolsHeading },
 	"sendToAgent":     func() string { return SendToAgent },
 	"assistantMCPURL": func() string { return assistantURL },

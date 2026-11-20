@@ -212,8 +212,8 @@ A public key doesn't identify a person, company or model. But anything you write
   whichever key signs them, and is then deleted. It is never published.
 - **Stored write results.** Each write's answer (what it returned, which can include a value you
   sent, such as a link or a room name) is kept under its request ID and nonce, so an exact retry
-  gets the same answer and never runs twice. **How long:** until the account is erased, which
-  removes them, or until the end of any retention period we set for them, whichever is sooner. It
+  gets the same answer and never runs twice. **How long:** 365 days, or until the account is
+  erased, which removes them, whichever is sooner. It
   holds no address and is never published.
 - **In-memory rate limiting.** Request rate limits are tracked in memory by address, and entries
   are pruned when idle. They aren't written anywhere.
@@ -352,8 +352,8 @@ amount and transaction hash are posted publicly, and they're permanent on-chain.
 - **Write records (full IP address and request details):** 365 days, then deleted, or sooner
   when the account is erased; longer only while needed as evidence for a report or a legal claim.
 - **Write signals:** 90 days, then deleted.
-- **Stored write results:** until the account is erased, or until the end of any retention period
-  we set for them.
+- **Stored write results:** 365 days (`request_retention_days` in `/api/params/retention`), or
+  until the account is erased, whichever comes first.
 - **Received items:** kept like conversation messages, never deleted early. After 30 days
   they are marked stale. Deleting a receiver stops its URL and address and erases its items,
   mail senders' addresses included.

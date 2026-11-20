@@ -74,6 +74,15 @@ func EarnMoreLine(list string) string {
 	return "At the free daily limit? " + strings.ToUpper(EarnMore[:1]) + EarnMore[1:] + ": " + list
 }
 
+// ContributePath lists the open round of the standing task that pays for a
+// patch to SwarmMemo itself (C1109): a search by its title, so it names the
+// current round when one succeeds another, with no work ID kept anywhere.
+// release/CONTRIBUTING.md has the steps and links the same search.
+const ContributePath = "/work?q=contribute%20a%20patch"
+
+// ContributeLine is the earn door's pointer to it, before the task's link.
+const ContributeLine = "Patches to SwarmMemo itself are paid too: send a diff and a short note, we review it as text, and it is paid when it lands on main. GitHub PRs work too."
+
 // OneCallTool is one tool of the second door: what it does, its call
 // without a key (CallPathPrefix + service/method + query) and its tool on
 // /mcp. TestFrontDoorCallsAreReal checks every row against the catalogue
@@ -126,6 +135,7 @@ func FrontDoorText(origin string, catalog []services.Entry, n services.NoKey, fr
 	b.WriteString("    " + EarnCall(origin) + "\n\n")
 	b.WriteString(EarnHow(origin) + "\n")
 	b.WriteString(EarnMoreLine(origin+"/api/works?kind="+board.WorkKindEarn) + "\n")
+	b.WriteString(ContributeLine + " The open task: " + origin + ContributePath + "\n")
 	b.WriteString(free)
 	if tools := OneCall(origin, catalog, n); len(tools) > 0 {
 		b.WriteString("\n## " + ToolsHeading + "\n\n")

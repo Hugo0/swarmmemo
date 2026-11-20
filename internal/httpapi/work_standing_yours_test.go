@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"swarmmemo/internal/allowance"
@@ -77,6 +78,51 @@ func TestStandingResultWhereItWent(t *testing.T) {
 	}
 	if y := yours(""); y != nil {
 		t.Fatalf("an anonymous read_work lists %v", y)
+	}
+
+	// C1144: the requester accepts A's first result and rejects B's, then A
+	// sends a second. Each worker's read_work lists its own results with
+	// their states, and its next step reads the newest judged one by its
+	// work_id.
+	verdict := fmt.Sprintf(`{"schema":1,"generation":"%s"}`, feed.Generation)
+	exec(board.Command{Operation: "work.accept", MessageID: replyA, Amount: 1, Data: verdict})
+	exec(board.Command{Operation: "work.reject", MessageID: replyB, Amount: 1, Reason: "not reproducible", Data: verdict})
+	replyA2 := mustTool(t, s, "/mcp", authA, "post_message", map[string]any{"reply_to": id, "text": "Bug: standing-a, a second one"})["receipt"].(map[string]any)["id"].(string)
+	if ack := dig(mustTool(t, s, "/mcp", authA, "claim_work", map[string]any{"message_id": id, "result_id": replyA2}), "data", "ack").(map[string]any); ack["result_work_id"] != replyA2 {
+		t.Fatalf("A's second claim ack: %v", ack)
+	}
+	readWork := func(auth string) map[string]any {
+		t.Helper()
+		return dig(mustTool(t, s, "/mcp", auth, "read_work", map[string]any{"message_id": id}), "data").(map[string]any)
+	}
+	nextStep := func(data map[string]any) (string, any) {
+		t.Helper()
+		steps, _ := data["next_steps"].([]any)
+		if len(steps) != 1 || dig(steps[0], "tool", "name") != "read_work" {
+			t.Fatalf("next_steps: %v", data["next_steps"])
+		}
+		return dig(steps[0], "text").(string), dig(steps[0], "tool", "arguments", "message_id")
+	}
+	dataA := readWork(authA)
+	states := map[any]any{}
+	for _, r := range dig(dataA, "work", "your_results").([]any) {
+		states[dig(r, "work_id")] = fmt.Sprint(dig(r, "state"), "/", dig(r, "verdict"))
+	}
+	if len(states) != 2 || states[replyA] != "accepted/accepted" || states[replyA2] != "submitted/<nil>" {
+		t.Fatalf("worker A's two results: %v", states)
+	}
+	if text, target := nextStep(dataA); target != replyA || !strings.Contains(text, replyA+" on this standing task was accepted") {
+		t.Fatalf("worker A's next step: %q -> %v", text, target)
+	}
+	dataB := readWork(authB)
+	if y := dig(dataB, "work", "your_results").([]any); len(y) != 1 || dig(y[0], "work_id") != replyB || dig(y[0], "verdict") != "rejected" {
+		t.Fatalf("worker B's your_results after the verdict: %v", y)
+	}
+	if text, target := nextStep(dataB); target != replyB || !strings.Contains(text, "was rejected") {
+		t.Fatalf("worker B's next step: %q -> %v", text, target)
+	}
+	if data := readWork(""); data["next_steps"] != nil || dig(data, "work", "your_results") != nil {
+		t.Fatalf("an anonymous read_work after the verdicts: %v", data)
 	}
 	var api map[string]any
 	if err = json.Unmarshal(makeRequest(s, "GET", "/api/work/"+id, "", "").Body.Bytes(), &api); err != nil {
