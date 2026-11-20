@@ -2,7 +2,9 @@ package board
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -386,6 +388,24 @@ func TestEraseOfferings(t *testing.T) {
 var eraseAccountColumns = []string{"account", "actor", "agent", "author", "caller", "created_by", "first_agent", "from_account", "invitee",
 	"owner", "public_key", "requester", "sponsor", "target_account", "to_account", "used_by", "voter_account", "worker"}
 
+// eraseContentKeyed is whether a table without an account column is keyed
+// by a content hash (C1134): a single primary key column named sha256, hash
+// or digest, or ending in one of those. Such a table can hold what an
+// account supplied (runs_code holds a run's source), reached through the
+// account's rows that name the hash, so it is handled or kept on purpose
+// like an account table.
+func eraseContentKeyed(pk []string) bool {
+	if len(pk) != 1 {
+		return false
+	}
+	for _, name := range []string{"sha256", "hash", "digest"} {
+		if pk[0] == name || strings.HasSuffix(pk[0], "_"+name) {
+			return true
+		}
+	}
+	return false
+}
+
 // eraseHandledElsewhere are tables an erasure touches without a count of
 // their own.
 var eraseHandledElsewhere = map[string]string{
@@ -397,65 +417,69 @@ var eraseHandledElsewhere = map[string]string{
 // and why. A new table lands here only with a reason; anything holding the
 // account's words or personal data belongs in EraseAccount instead.
 var eraseKeptTables = map[string]string{
-	"account_breakers":     "abuse breakers on the account: numbers and a server reason",
-	"agent_days":           "activity counts per day, numbers only",
-	"agent_funnel":         "funnel stages, numbers and labels only",
-	"apps":                 "an app's public name and homepage: a product, its house agents still run",
-	"conversations":        "conversations it opened: other members' messages and the signed opening (keys and a signature) rest on them",
-	"credit_topups":        "payments with wallets and transaction hashes (accounting)",
-	"delegations":          "signed key delegations: public keys only, revoked with the parent's keys",
-	"endorsement_records":  "votes and vouches as weights (other accounts' standing rests on them)",
-	"honors":               "operator-awarded public titles",
-	"identity_house":       "an identity's app: a link to another account, no content",
-	"leases":               "short-lived room locks that expire on their own",
-	"ledger_entries":       "credit ledger (accounting)",
-	"ledger_holds":         "credit holds (accounting; held credits refuse an erasure)",
-	"ledger_lots":          "credit lots (accounting)",
-	"ledger_transfers":     "credit transfers between accounts (accounting)",
-	"lever_log":            "operator lever records: the actor is the operator",
-	"levers":               "operator levers: the actor is the operator",
-	"members":              "room membership, no content",
-	"moderation_decisions": "moderation decisions (an erasure does not end a sanction)",
-	"moderation_domains":   "moderation's record of a link domain: its state and the first key seen with it",
-	"notary_public_keys":   "the notary's own keys",
-	"oauth_codes":          "one-time sign-in codes that expire within minutes; the sign-ins are revoked",
-	"oauth_signing_keys":   "the server's own signing keys",
-	"offering_calls":       "the other party's record of a paid call, with its own pay_to",
-	"params":               "operator parameter versions: the actor is the operator",
-	"post_mentions":        "other members' posts that mention the account",
-	"private_read_grants":  "signed read grants: public keys only, revoked with the owner's keys",
-	"proof_bonds":          "bonds with wallets and transaction hashes (accounting)",
-	"quota":                "byte quota per day, numbers only",
-	"reports":              "reports it filed, with their reasons: moderation records (an erasure does not end a sanction)",
-	"room_invites":         "invites: a secret's hash, the room and keys; other members' membership rests on them",
-	"room_moderation_log":  "moderation records",
-	"room_moderators":      "room roles; the keys are revoked, so they cannot act",
-	"rooms":                "rooms it created: other members' messages live in them; its keys are revoked, so it cannot act as owner",
-	"runs_network_blocks":  "moderation records on code runs",
-	"runs_reviews":         "moderation reviews of code by hash",
-	"runs_usage":           "run counts per day, numbers only",
-	"sanctions":            "sanctions (an erasure does not end a sanction)",
-	"seal_epochs":          "sealed rooms' signed key epochs, which other members' messages rest on",
-	"spend_limits":         "limits on revoked tokens, numbers only",
-	"standing_assessments": "proof assessments, values and roots only as keyed hashes (erasedMAC): one outside account never makes a second identity (login.go)",
-	"standing_challenges":  "proof challenges that expire within the challenge window",
-	"tier_grant_log":       "operator grant records (accounting)",
-	"tier_grants":          "operator grants (accounting)",
-	"trust_current":        "trust scores, numbers only",
-	"trust_dividends":      "sponsorship dividends, numbers only",
-	"trust_penalties":      "trust penalties (sanctions)",
-	"trust_penalty_log":    "trust penalty records (sanctions)",
-	"trust_scores":         "trust scores, numbers only",
-	"trust_sponsorships":   "sponsorships as weights (other accounts' standing rests on them)",
-	"votes":                "votes as weights (other accounts' standing rests on them)",
-	"vouches":              "vouches as weights (other accounts' standing rests on them)",
-	"wakeup_notices":       "fired wakeup notices: ids and times, cancelled with the wakeups",
-	"webhook_rates":        "delivery counts per hour, numbers only",
-	"work_review_fees":     "review fees (accounting; fees in flight refuse an erasure)",
-	"work_rewards":         "work rewards (accounting; rewards in flight refuse an erasure)",
-	"work_transitions":     "signed work transitions (the other party's record of the work)",
-	"work_usdc":            "USDC payouts and their transaction hashes (accounting)",
-	"x402_payments":        "payments with wallets and transaction hashes (accounting)",
+	"account_breakers":        "abuse breakers on the account: numbers and a server reason",
+	"agent_days":              "activity counts per day, numbers only",
+	"agent_funnel":            "funnel stages, numbers and labels only",
+	"apps":                    "an app's public name and homepage: a product, its house agents still run",
+	"conversations":           "conversations it opened: other members' messages and the signed opening (keys and a signature) rest on them",
+	"credit_topups":           "payments with wallets and transaction hashes (accounting)",
+	"delegations":             "signed key delegations: public keys only, revoked with the parent's keys",
+	"endorsement_records":     "votes and vouches as weights (other accounts' standing rests on them)",
+	"honors":                  "operator-awarded public titles",
+	"identity_house":          "an identity's app: a link to another account, no content",
+	"leases":                  "short-lived room locks that expire on their own",
+	"ledger_entries":          "credit ledger (accounting)",
+	"ledger_holds":            "credit holds (accounting; held credits refuse an erasure)",
+	"ledger_lots":             "credit lots (accounting)",
+	"ledger_transfers":        "credit transfers between accounts (accounting)",
+	"lever_log":               "operator lever records: the actor is the operator",
+	"levers":                  "operator levers: the actor is the operator",
+	"members":                 "room membership, no content",
+	"moderation_decisions":    "moderation decisions (an erasure does not end a sanction)",
+	"moderation_domains":      "moderation's record of a link domain: its state and the first key seen with it",
+	"notary_public_keys":      "the notary's own keys",
+	"oauth_assertions_used":   "content-keyed: hashes of spent sign-in assertions and their expiry, no content",
+	"oauth_codes":             "one-time sign-in codes that expire within minutes; the sign-ins are revoked",
+	"oauth_exchanged_revoked": "content-keyed: hashes of revoked exchanged tokens and their expiry, no content",
+	"oauth_refresh_used":      "content-keyed: hashes of spent refresh tokens, their family and time, no content",
+	"oauth_signing_keys":      "the server's own signing keys",
+	"offering_calls":          "the other party's record of a paid call, with its own pay_to",
+	"params":                  "operator parameter versions: the actor is the operator",
+	"post_mentions":           "other members' posts that mention the account",
+	"private_read_grants":     "signed read grants: public keys only, revoked with the owner's keys",
+	"proof_bonds":             "bonds with wallets and transaction hashes (accounting)",
+	"quota":                   "byte quota per day, numbers only",
+	"reports":                 "reports it filed, with their reasons: moderation records (an erasure does not end a sanction)",
+	"room_invites":            "invites: a secret's hash, the room and keys; other members' membership rests on them",
+	"room_moderation_log":     "moderation records",
+	"room_moderators":         "room roles; the keys are revoked, so they cannot act",
+	"rooms":                   "rooms it created: other members' messages live in them; its keys are revoked, so it cannot act as owner",
+	"runs_network_blocks":     "moderation records on code runs",
+	"runs_reviews":            "moderation reviews of code by hash",
+	"runs_usage":              "run counts per day, numbers only",
+	"sanctions":               "sanctions (an erasure does not end a sanction)",
+	"seal_epochs":             "sealed rooms' signed key epochs, which other members' messages rest on",
+	"spend_limits":            "limits on revoked tokens, numbers only",
+	"standing_assessments":    "proof assessments, values and roots only as keyed hashes (erasedMAC): one outside account never makes a second identity (login.go)",
+	"standing_challenges":     "proof challenges that expire within the challenge window",
+	"tier_grant_log":          "operator grant records (accounting)",
+	"tier_grants":             "operator grants (accounting)",
+	"trust_current":           "trust scores, numbers only",
+	"trust_dividends":         "sponsorship dividends, numbers only",
+	"trust_penalties":         "trust penalties (sanctions)",
+	"trust_penalty_log":       "trust penalty records (sanctions)",
+	"trust_scores":            "trust scores, numbers only",
+	"trust_sponsorships":      "sponsorships as weights (other accounts' standing rests on them)",
+	"votes":                   "votes as weights (other accounts' standing rests on them)",
+	"vouches":                 "vouches as weights (other accounts' standing rests on them)",
+	"wakeup_notices":          "fired wakeup notices: ids and times, cancelled with the wakeups",
+	"webhook_rates":           "delivery counts per hour, numbers only",
+	"work_review_fees":        "review fees (accounting; fees in flight refuse an erasure)",
+	"work_rewards":            "work rewards (accounting; rewards in flight refuse an erasure)",
+	"work_transitions":        "signed work transitions (the other party's record of the work)",
+	"work_usdc":               "USDC payouts and their transaction hashes (accounting)",
+	"x402_payments":           "payments with wallets and transaction hashes (accounting)",
+	"x402_summary_screens":    "content-keyed: screening verdicts on outside catalogue summaries by hash, no content",
 }
 
 // C1051: every table with an account column is erased or kept on purpose,
@@ -483,23 +507,38 @@ func TestEraseCoversEveryAccountTable(t *testing.T) {
 	for _, c := range eraseAccountColumns {
 		cols[c] = true
 	}
-	rows, err := s.db.Query("SELECT m.name,p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' ORDER BY m.name")
+	rows, err := s.db.Query("SELECT m.name,p.name,p.pk FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' ORDER BY m.name,p.pk")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tables := map[string]bool{}
 	all := map[string]bool{}
+	pks := map[string][]string{}
 	for rows.Next() {
 		var table, col string
-		if err = rows.Scan(&table, &col); err != nil {
+		var pk int
+		if err = rows.Scan(&table, &col, &pk); err != nil {
 			t.Fatal(err)
 		}
 		all[table] = true
 		if cols[col] {
 			tables[table] = true
 		}
+		if pk > 0 {
+			pks[table] = append(pks[table], col)
+		}
 	}
 	rows.Close()
+	// C1134: a content-keyed table with no account column is reached through
+	// the account's rows that name the hash, and is covered the same way.
+	for table := range all {
+		if !tables[table] && eraseContentKeyed(pks[table]) {
+			tables[table] = true
+		}
+	}
+	if !tables["runs_code"] || !handled["runs_code"] {
+		t.Errorf("runs_code (a run's source by hash): found as content-keyed %v, handled %v", tables["runs_code"], handled["runs_code"])
+	}
 	// C1124: the stored write answers and the audit trail name the account
 	// as actor, and are erased.
 	for _, want := range []string{"requests", "audit"} {
@@ -513,12 +552,12 @@ func TestEraseCoversEveryAccountTable(t *testing.T) {
 		case handled[table] && kept:
 			t.Errorf("%s is erased and also listed as kept: drop it from eraseKeptTables", table)
 		case !handled[table] && !kept:
-			t.Errorf("%s has an account column but account erasure neither handles it nor lists it in eraseKeptTables with a reason", table)
+			t.Errorf("%s has an account column or is content-keyed, but account erasure neither handles it nor lists it in eraseKeptTables with a reason", table)
 		}
 	}
 	for table, why := range eraseKeptTables {
 		if !tables[table] || why == "" {
-			t.Errorf("eraseKeptTables lists %s, which has no account column (or no reason)", table)
+			t.Errorf("eraseKeptTables lists %s, which has no account column and is not content-keyed (or no reason)", table)
 		}
 	}
 	for table := range handled {
@@ -668,5 +707,90 @@ INSERT INTO requests(actor,request_key,digest,result,created_at) SELECT 'anon:ol
 	fails(t, s, post, "stale_signature")
 	if n := sqlCount(t, s, "SELECT count(*) FROM events WHERE account=? AND text='posted once'", keyID(alice)); n != 1 {
 		t.Fatalf("the pruned write ran again: %d posts", n)
+	}
+}
+
+// C1134: runs_code holds a run's source by its hash, with no account column.
+// An erasure blanks the source of the account's runs, unless an account not
+// erased ran the same code: bob's shared code stays, code shared only with
+// an account erased before goes. Hash and language stay; the receipt counts
+// the blanked rows; a second run counts none.
+func TestEraseBlanksRunSourceCode(t *testing.T) {
+	s := openTest(t, Config{})
+	alice, bob, carol := keyFor(221), keyFor(222), keyFor(223)
+	a, b, c := keyID(alice), keyID(bob), keyID(carol)
+	for _, k := range []ed25519.PrivateKey{alice, bob, carol} {
+		register(t, s, k)
+	}
+	code := map[string]string{}
+	n := 0
+	ran := func(account, name string) {
+		t.Helper()
+		src := "export function run() { return '" + name + " c1134' }"
+		code[name] = sha256Hex([]byte(src))
+		n++
+		for _, q := range []struct {
+			query string
+			args  []any
+		}{
+			{"INSERT OR IGNORE INTO runs_code(sha256,language,code,first_seen) VALUES(?,'javascript',?,1)", []any{code[name], src}},
+			{"INSERT INTO runs_log(run_id,account,request_key,created_at,language,code_sha256,input,input_sha256,network_requested,cpu_ms_limit,wall_ms_limit,status) VALUES(?,?,?,1,'javascript',?,'null','h',0,1,1,'ok')",
+				[]any{fmt.Sprintf("run-%d", n), account, fmt.Sprintf("id:r%d", n), code[name]}},
+		} {
+			if _, err := s.db.Exec(q.query, q.args...); err != nil {
+				t.Fatalf("%s: %v", q.query, err)
+			}
+		}
+	}
+	ran(a, "alice-own")
+	ran(a, "shared-bob")
+	ran(b, "shared-bob")
+	ran(a, "shared-carol")
+	ran(c, "shared-carol")
+	ran(c, "carol-own")
+	ran(b, "bob-own")
+	source := func(name string) string {
+		t.Helper()
+		var src, lang string
+		if err := s.db.QueryRow("SELECT code,language FROM runs_code WHERE sha256=?", code[name]).Scan(&src, &lang); err != nil || lang != "javascript" {
+			t.Fatalf("runs_code %s: %q %v (the row and its language stay)", name, lang, err)
+		}
+		return src
+	}
+
+	// Carol first: her own code goes, the code alice also ran stays.
+	rc, err := s.OperatorEraseAccount(testContext, c, "req-c1134-c", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := eraseCount(rc, "runs_code", "blanked"); got != 1 {
+		t.Fatalf("carol's runs_code count %d, want 1: %+v", got, rc.Counts)
+	}
+	if source("carol-own") != "" || source("shared-carol") == "" {
+		t.Fatal("carol's erasure: her own source must go, code alice also ran must stay")
+	}
+
+	dry, err := s.OperatorEraseAccount(testContext, a, "req-c1134-a", false)
+	if err != nil || eraseCount(dry, "runs_code", "blanked") != 2 || source("alice-own") == "" {
+		t.Fatalf("preview: %+v %v", dry.Counts, err)
+	}
+	r, err := s.OperatorEraseAccount(testContext, a, "req-c1134-a", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := eraseCount(r, "runs_code", "blanked"); got != 2 {
+		t.Fatalf("alice's runs_code count %d, want 2: %+v", got, r.Counts)
+	}
+	for name, want := range map[string]bool{"alice-own": false, "shared-carol": false, "shared-bob": true, "bob-own": true, "carol-own": false} {
+		if got := source(name) != ""; got != want {
+			t.Errorf("%s: source kept %v, want %v", name, got, want)
+		}
+	}
+	if sqlCount(t, s, "SELECT count(*) FROM runs_code WHERE instr(code,'alice-own')>0 OR instr(code,'carol')>0") != 0 {
+		t.Fatal("an erased account's run source survived")
+	}
+	again, err := s.OperatorEraseAccount(testContext, a, "req-c1134-a2", true)
+	if err != nil || eraseCount(again, "runs_code", "blanked") != 0 {
+		t.Fatalf("second run: %+v %v", again.Counts, err)
 	}
 }

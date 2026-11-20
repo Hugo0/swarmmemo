@@ -2,5 +2,8 @@
  "bitcoin": {
   "usd": 61234.0,
   "last_updated_at": 1790000000
- }
+ },
+ "hive_dollar": {"usd": 1.01},
+ "-3": {"usd": 0.000001},
+ "cognizant-technology-solutions-corporation-class-a-robinhood-token": {"usd": 62.5}
 }

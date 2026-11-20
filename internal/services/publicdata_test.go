@@ -733,6 +733,49 @@ func TestPublicDataCongressAndFEC(t *testing.T) {
 	}
 }
 
+// C1135 (b36e1c36, bug report 838235a3): CoinGecko ids with '_', a leading
+// '-' or more than 64 bytes reach the upstream; anything that could leave
+// the ids= value stays refused.
+func TestPublicDataCoinGeckoListingIDs(t *testing.T) {
+	v := newPDEnv(t, false)
+	for _, tc := range []struct {
+		id    string
+		price float64
+	}{
+		{"hive_dollar", 1.01},
+		{"-3", 0.000001},
+		{"cognizant-technology-solutions-corporation-class-a-robinhood-token", 62.5},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			_, data := v.mustFetch(t, "crypto_spot_price", fmt.Sprintf(`{"coin_id":%q}`, tc.id), unix("2026-09-20"))
+			eq(t, "id", data["coin_id"], tc.id)
+			near(t, "price", data["price"], tc.price)
+			calls, _ := v.fakes["api.coingecko.com"].seen()
+			if len(calls) == 0 {
+				t.Fatal("no price lookup")
+			}
+			req, err := url.Parse(calls[len(calls)-1])
+			if err != nil || req.Query().Get("ids") != tc.id {
+				t.Fatalf("wrong price query for %q: %v", tc.id, calls)
+			}
+		})
+	}
+	// Upper case is lowered, as before, never refused.
+	_, data := v.mustFetch(t, "crypto_spot_price", `{"coin_id":"Hive_Dollar"}`, unix("2026-09-20"))
+	eq(t, "lowered", data["coin_id"], "hive_dollar")
+	now := unix("2026-09-20")
+	for _, id := range []string{strings.Repeat("a", 128), strings.Repeat("_", 3), "-3"} {
+		if _, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(fmt.Sprintf(`{"dataset":"crypto_spot_price","params":{"coin_id":%q}}`, id)), now); err != nil {
+			t.Errorf("%q: %v", id, err)
+		}
+	}
+	for _, id := range []string{strings.Repeat("a", 129), "", "a/b", "..", "../x", "a.b", "a%2fb", "a&ids=b", "a,b", "a b", "a#b", "a?b", "é", "a\\b"} {
+		if _, _, err := services.PublicDataParseForTest("fetch", json.RawMessage(fmt.Sprintf(`{"dataset":"crypto_spot_price","params":{"coin_id":%q}}`, id)), now); code(err) != "invalid_service_data" {
+			t.Errorf("%q: want invalid_service_data, got %v", id, err)
+		}
+	}
+}
+
 func TestPublicDataCryptoAndFRED(t *testing.T) {
 	v := newPDEnv(t, true)
 	item, d := v.mustFetch(t, "crypto_spot_price", `{"coin_id":"Bitcoin"}`, unix("2026-09-20"))

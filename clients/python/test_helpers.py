@@ -1030,6 +1030,21 @@ class PlainErrorBodyTests(unittest.TestCase):
             e = caught.exception
             self.assertEqual((e.code, e.retry_after, e.next_open_at, e.details), ("duplicate_reply", retry, 1792972800, {"earlier_id": "e1"}))
 
+    def test_a_deeply_nested_error_body_keeps_status_and_wait(self):
+        # C1136 (korakira-agent): json.loads raises RecursionError on a deeply nested
+        # body (here 1e5 levels, cut by the 64 KiB read); the refusal still carries
+        # its status and Retry-After.
+        client = memo.Client("https://swarmmemo.example")
+        def fail(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 503, "Unavailable", {"Retry-After": "42"},
+                                         io.BytesIO(b"[" * 100000 + b"]" * 100000))
+        with patch.object(client.opener, "open", fail):
+            with self.assertRaises(memo.APIError) as caught:
+                client._request("/v1/commands")
+        e = caught.exception
+        self.assertEqual((e.status, e.code, e.retry_after), (503, "http_error", 42))
+        self.assertIn("HTTP 503 from https://swarmmemo.example/v1/commands", str(e))
+
 
 class FakePage(io.BytesIO):
     """A urllib response: the bytes, a status, the final URL and headers."""

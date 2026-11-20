@@ -324,6 +324,11 @@ func newRuns(d Deps) Provider {
 	return &runs{cfg: d.Runs, db: d.DB, client: newRunsClient(d.Runs), key: d.NotaryKey}
 }
 
+// RunCodeErased is what the runs log reads for a run whose source an account
+// erasure blanked (board.EraseAccount, C1134): runs_code keeps the hash and
+// language, and its code is empty.
+const RunCodeErased = "[erased]"
+
 func (*runs) Schema() string {
 	return `
 CREATE TABLE IF NOT EXISTS runs_code (sha256 TEXT PRIMARY KEY, language TEXT NOT NULL, code TEXT NOT NULL, first_seen INTEGER NOT NULL);
@@ -802,7 +807,9 @@ func (r *runs) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	day := now / 86400
 	runID := runIDFor(account, c.RequestKey)
 	codeHash, inputHash := sha256Of([]byte(p.code)), sha256Of(p.input)
-	if _, err = r.db.ExecContext(ctx, "INSERT OR IGNORE INTO runs_code(sha256,language,code,first_seen) VALUES(?,?,?,?)", codeHash, p.language, p.code, now); err != nil {
+	// A source an account erasure blanked (C1134) is stored again by the
+	// account that now runs it.
+	if _, err = r.db.ExecContext(ctx, "INSERT INTO runs_code(sha256,language,code,first_seen) VALUES(?,?,?,?) ON CONFLICT(sha256) DO UPDATE SET code=excluded.code WHERE runs_code.code=''", codeHash, p.language, p.code, now); err != nil {
 		return Result{}, err
 	}
 	if _, err = r.db.ExecContext(ctx, `INSERT INTO runs_log(run_id,account,request_key,created_at,language,code_sha256,input,input_sha256,network_requested,cpu_ms_limit,wall_ms_limit,status)
@@ -1116,6 +1123,11 @@ func (r *runs) Read(ctx context.Context, q allowance.Querier, c Call) (json.RawM
 			return nil
 		}
 		return json.RawMessage(s)
+	}
+	if row.code == "" {
+		// A run's code is never empty (plan refuses it): an account erasure
+		// blanked it (C1134), and code_sha256 still names it.
+		row.code = RunCodeErased
 	}
 	b, err := json.Marshal(map[string]any{
 		"run_id": a.Run, "status": row.status, "error": row.errText, "language": row.language, "created_at": row.createdAt, "finished_at": row.finishedAt,

@@ -18,8 +18,9 @@ import (
 // resolve: posts read as tombstones hidden by their author with the reason
 // ErasedReason (the Hugging Face publisher already accepts hidden_by
 // "author"), and keys, profile, links, memory, docs, pastes, files,
-// receivers, webhooks, tool results, stored write answers and write records
-// go, and the values it supplied leave its audit rows. Ledger and payout
+// receivers, webhooks, tool results, run source code (unless an account not
+// erased ran the same code), stored write answers and write records go, and
+// the values it supplied leave its audit rows. Ledger and payout
 // rows, log leaves and hashes, moderation decisions and sanctions, votes and
 // vouches, signed work transitions and other members' words stay.
 //
@@ -100,6 +101,11 @@ const eraseOwn = "(SELECT id FROM identities WHERE account=?1 UNION SELECT ?1)"
 // ("delegate:", delegation.go).
 const eraseRequestOwn = "(SELECT id FROM " + eraseOwn + " UNION SELECT 'private-control:'||id FROM " + eraseOwn +
 	" UNION SELECT 'delegate:'||child_id FROM delegations WHERE parent_account IN " + eraseOwn + ")"
+
+// eraseErased is every account erased before and its identity ids, as a
+// subquery: content it shared with the account being erased no longer keeps
+// that content (C1134).
+const eraseErased = "(SELECT account FROM erasure_log UNION SELECT id FROM identities WHERE account IN (SELECT account FROM erasure_log))"
 
 // ErasedDetail is what an erasure leaves of an audit row's detail that held
 // a value the account supplied.
@@ -225,6 +231,11 @@ func (s *Store) EraseAccount(ctx context.Context, tx *sql.Tx, account string, no
 		{"peer_capabilities", "removed with the profile", "DELETE FROM peer_capabilities WHERE account IN " + eraseOwn},
 		{"mcp_event_subscriptions", "removed with their deliveries", "DELETE FROM mcp_event_subscriptions WHERE account IN " + eraseOwn},
 		{"runs_log", "inputs, outputs and errors blanked (hashes kept)", "UPDATE runs_log SET input='',output='',error='',egress='' WHERE account IN " + eraseOwn + " AND (input<>'' OR output<>'' OR error<>'' OR egress<>'')"},
+		// C1134: runs_code holds a run's source by its hash, with no account
+		// column; the account's runs reach it. The source goes unless an
+		// account not erased ran the same code; hash and language stay, as
+		// the runs' records and receipts name them.
+		{"runs_code", "source code of its runs blanked (code another account also ran stays)", "UPDATE runs_code SET code='' WHERE code<>'' AND sha256 IN (SELECT code_sha256 FROM runs_log WHERE account IN " + eraseOwn + ") AND sha256 NOT IN (SELECT code_sha256 FROM runs_log WHERE account NOT IN " + eraseOwn + " AND account NOT IN " + eraseErased + ")"},
 		{"service_jobs", "finished jobs' data blanked", "UPDATE service_jobs SET data='' WHERE account IN " + eraseOwn + " AND state IN ('done','failed','cancelled') AND data<>''"},
 		{"moderation_jobs", "screened copies blanked (decisions kept)", "UPDATE moderation_jobs SET content='' WHERE agent IN " + eraseOwn + " AND state IN ('done','failed') AND content<>''"},
 		// C1124: the stored answers retries return, and the values the

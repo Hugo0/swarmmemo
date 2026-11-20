@@ -756,3 +756,41 @@ func FuzzLoaderResponse(f *testing.F) {
 		}
 	})
 }
+
+// C1134: an account erasure blanks runs_code.code (board.EraseAccount). The
+// run's log then reads its code as erased, never as an empty program, and
+// keeps the hash; another account that runs the same code stores it again.
+func TestRunsErasedCodeReadsAsErased(t *testing.T) {
+	env := newRunsEnv(t, runsOpts{})
+	body, err := env.call(alice, jsArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = env.db.Exec("UPDATE runs_code SET code=''"); err != nil {
+		t.Fatal(err)
+	}
+	logData := fmt.Sprintf(`{"schema":1,"method":"log","args":{"run":%q}}`, body["run_id"])
+	read := func() map[string]any {
+		t.Helper()
+		got, err := env.engine.Read(context.Background(), env.db, services.Request{Service: "runs", Data: logData, Subject: alice}, time.Now().Unix())
+		if err != nil {
+			t.Fatalf("log read: %v", err)
+		}
+		var out map[string]any
+		if err = json.Unmarshal(got["result"].(json.RawMessage), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	codeSum := sha256.Sum256([]byte("export function run(i) { return {ok: true} }"))
+	if got := read(); got["code"] != services.RunCodeErased || got["code_sha256"] != hex.EncodeToString(codeSum[:]) {
+		t.Fatalf("an erased run's code reads %q (hash %v)", got["code"], got["code_sha256"])
+	}
+	bob := allowance.Subject{ID: "acct-bob", KeyID: "k-bob", Signed: true}
+	if _, err = env.call(bob, jsArgs); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got["code"] != "export function run(i) { return {ok: true} }" {
+		t.Fatalf("the same code run again is not stored again: %q", got["code"])
+	}
+}

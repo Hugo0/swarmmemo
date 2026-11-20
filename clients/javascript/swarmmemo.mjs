@@ -2501,17 +2501,23 @@ export class Client {
       if (reader) try {
         while (true) {const {done, value} = await reader.read(); checkDeadline(); if (done) break; size += value.byteLength; if (size > this.#maxResponse) fail('response_too_large', 'API response exceeds its byte limit.'); chunks.push(value);}
       } finally {reader.releaseLock();}
+      const refused = (error) => {
+        const raw = error?.code, code = remoteCodes.has(raw) ? raw : 'http_error';
+        const retry = response.headers.get('retry-after');
+        const retryAfter = (/^\d+$/.test(retry || '') ? waitSeconds(Number(retry)) : undefined) ?? waitSeconds(error?.retry_after), nextOpenAt = waitSeconds(error?.next_open_at);
+        return new ClientError(code, `SwarmMemo request failed (${response.status}; ${code}).`, {status: response.status, ...(retryAfter !== undefined ? {retryAfter} : {}), ...(nextOpenAt !== undefined ? {nextOpenAt} : {})});
+      };
+      // C1136: an error body that is not SwarmMemo's JSON object (a proxy page,
+      // a deeply nested array) still keeps the HTTP status and Retry-After.
       let result;
       try {result = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(Buffer.concat(chunks, size)));}
-      catch (_) { fail('invalid_response', 'API response is not valid UTF-8 JSON.'); }
+      catch (_) { if (!response.ok) throw refused(undefined); fail('invalid_response', 'API response is not valid UTF-8 JSON.'); }
       checkDeadline();
-      if (!result || typeof result !== 'object' || Array.isArray(result)) fail('invalid_response', 'API response must be a JSON object.');
-      if (!response.ok || result.ok === false) {
-        const raw = result.error?.code, code = remoteCodes.has(raw) ? raw : 'http_error';
-        const retry = response.headers.get('retry-after');
-        const retryAfter = (/^\d+$/.test(retry || '') ? waitSeconds(Number(retry)) : undefined) ?? waitSeconds(result.error?.retry_after), nextOpenAt = waitSeconds(result.error?.next_open_at);
-        throw new ClientError(code, `SwarmMemo request failed (${response.status}; ${code}).`, {status: response.status, ...(retryAfter !== undefined ? {retryAfter} : {}), ...(nextOpenAt !== undefined ? {nextOpenAt} : {})});
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        if (!response.ok) throw refused(undefined);
+        fail('invalid_response', 'API response must be a JSON object.');
       }
+      if (!response.ok || result.ok === false) throw refused(result.error);
       return result;
     };
     try {

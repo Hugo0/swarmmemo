@@ -1236,7 +1236,10 @@ var dsCryptoPrice = &pdDataset{
 	Description: "A cryptocurrency's current spot price from CoinGecko's public simple-price endpoint.",
 	Output:      "data: coin_id, vs_currency, price, last_updated_at (RFC 3339, CoinGecko's own timestamp)",
 	Params: []pdParam{
-		{Name: "coin_id", Kind: "string", Required: true, MaxLen: 64, Pattern: regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`), Norm: pdLower, Doc: "CoinGecko coin id, e.g. bitcoin"},
+		// C1135: CoinGecko ids carry '_' (hive_dollar), may start with '-'
+		// (-3) and run past 64 bytes (tokenized ETFs). The id goes upstream
+		// only as an escaped ids= query value.
+		{Name: "coin_id", Kind: "string", Required: true, MaxLen: 128, Pattern: regexp.MustCompile(`^[a-z0-9_-]{1,128}$`), Norm: pdLower, Doc: "CoinGecko coin id, e.g. bitcoin or hive_dollar"},
 		{Name: "vs_currency", Kind: "string", MaxLen: 8, Pattern: regexp.MustCompile(`^[a-z]{2,8}$`), Norm: pdLower, Default: "usd", Doc: "quote currency"},
 	},
 	Validate: func(p *pdParams, _ time.Time) bool {

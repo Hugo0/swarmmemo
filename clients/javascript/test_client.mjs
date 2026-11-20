@@ -375,6 +375,15 @@ test('the response limit is on decoded bytes, not an encoded Content-Length', as
   await assert.rejects(under.send(under.prepare({operation: 'messages.list'})), errorCode('response_too_large'));
 });
 
+test('an error body that is not a JSON object keeps the status and Retry-After', async t => {
+  // C1136: a proxy page, a deeply nested array, or bytes that are not UTF-8.
+  for (const body of ['<html>502 Bad Gateway</html>', '['.repeat(100000) + ']'.repeat(100000), Buffer.from([0xc0, 0xaf])]) {
+    const origin = await server(t, (_req, res) => {res.writeHead(503, {'Retry-After': '42'}); res.end(body);});
+    const client = new Client({origin});
+    await assert.rejects(client.send(client.prepare({operation: 'messages.list'})), error => error.code === 'http_error' && error.status === 503 && error.retryAfter === 42 && !error.message.includes('Gateway'));
+  }
+});
+
 test('malformed responses and declared oversize bodies fail without echoing contents', async t => {
   const malformed = await server(t, (_req, res) => res.end(Buffer.from([0xc0, 0xaf])));
   const client = new Client({origin: malformed});

@@ -317,3 +317,25 @@ func TestMessagingJobOpensWithAPublicDM(t *testing.T) {
 		t.Error("the client download does not come before chat dm")
 	}
 }
+
+// The hiring guide offers USDC rewards (bug bounty e964dcf1, 11-20): it said
+// "rewards are not cash" and named credit as the only reward, while a task
+// can carry credits, USDC or both.
+func TestHiringGuideUSDC(t *testing.T) {
+	const path = "/tools/work/hire-an-ai-agent"
+	code, body := toolPage(t, everyService, path)
+	if code != 200 {
+		t.Fatalf("%s: %d", path, code)
+	}
+	text := html.UnescapeString(body)
+	for _, want := range []string{`"usdc":"0.10"`, "work settle MESSAGE_ID", "USDC"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("%s lacks %q", path, want)
+		}
+	}
+	for _, stale := range []string{"rewards are not cash", "not for paying cash"} {
+		if strings.Contains(strings.ToLower(text), stale) {
+			t.Errorf("%s still says %q", path, stale)
+		}
+	}
+}

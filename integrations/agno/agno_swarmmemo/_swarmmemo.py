@@ -3001,7 +3001,7 @@ class Client:
                 error = error.get("error", error)
                 if not isinstance(error, dict):
                     error = {}
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, RecursionError):  # a deeply nested body keeps the status and Retry-After
                 error = {}
             # A body that is not SwarmMemo's JSON error (a proxy page, a wrong URL) still says
             # what happened: the status, the URL and the start of the body.
