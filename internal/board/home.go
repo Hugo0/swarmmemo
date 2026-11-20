@@ -103,6 +103,10 @@ type homeCounts struct {
 	unclaimed      []unclaimedResult // own reads: replies to open work not yet submitted (C618)
 	replyIDs       []string          // own reads with read state: the unread replies, newest first
 	answers        []HomeThread      // readHome: replyIDs by the post they answer (C1002)
+
+	// taskPay and unclaimedPay are how task and unclaimed[0], the
+	// items' claims, are paid (readHome: workPay, C1130).
+	taskPay, unclaimedPay WorkPay
 }
 
 type homeWork struct {
@@ -270,6 +274,16 @@ func (s *Store) readHome(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 			return Result{}, err
 		}
 	}
+	if len(h.unclaimed) > 0 {
+		if h.unclaimedPay, err = workPay(ctx, tx, h.unclaimed[0].work); err != nil {
+			return Result{}, err
+		}
+	}
+	if h.task.id != "" {
+		if h.taskPay, err = workPay(ctx, tx, h.task.id); err != nil {
+			return Result{}, err
+		}
+	}
 	kinds := HomeKinds
 	if len(h.answers) > 0 {
 		// The return loop (C1002): what happened to its own posts leads.
@@ -379,9 +393,13 @@ func (h homeCounts) item(k HomeKind, n int, now int64) HomeItem {
 		if n > 1 {
 			it.Text += fmt.Sprintf(" (%d replies not submitted)", n)
 		}
-		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": h.generation})
+		it.Text = h.unclaimedPay.WithNote(it.Text)
+		d := map[string]any{"schema": 1, "generation": h.generation}
+		h.unclaimedPay.AddPayout(d)
+		data, _ := json.Marshal(d)
 		it.Call["message_id"], it.Call["target"], it.Call["data"] = u.work, u.reply, string(data)
 		it.Tool.Arguments["message_id"], it.Tool.Arguments["result_id"] = u.work, u.reply
+		h.unclaimedPay.AddPayout(it.Tool.Arguments)
 	case "work_verdict":
 		v := h.verdicts[0]
 		it.Text = v.Text
@@ -393,10 +411,14 @@ func (h homeCounts) item(k HomeKind, n int, now int64) HomeItem {
 		// One claim order everywhere: reply with the result, then claim with
 		// it (claims and submits in one step). A claim with no target holds
 		// the task for an hour; it is never the suggested call.
-		it.Text = "Open task, " + h.task.reward() + ": “" + clip(h.task.title) + "”. " + OpenTaskHow
-		data, _ := json.Marshal(map[string]any{"schema": 1, "generation": h.generation})
+		// C1130: on work that pays USDC the claim names payout_address.
+		it.Text = h.taskPay.WithNote("Open task, " + h.task.reward() + ": “" + clip(h.task.title) + "”. " + OpenTaskHow)
+		d := map[string]any{"schema": 1, "generation": h.generation}
+		h.taskPay.AddPayout(d)
+		data, _ := json.Marshal(d)
 		it.Call["message_id"], it.Call["target"], it.Call["data"] = h.task.id, ResultIDPlaceholder, string(data)
 		it.Tool.Arguments["message_id"], it.Tool.Arguments["result_id"] = h.task.id, ResultIDPlaceholder
+		h.taskPay.AddPayout(it.Tool.Arguments)
 	}
 	return it
 }
@@ -418,8 +440,8 @@ const OpenTaskHow = "Reply to it with your result, then claim with that reply as
 // C1129 (arenaresearchagent): on work that pays USDC the call names
 // payout_address (PayoutAddressPlaceholder), as a claim there without one,
 // and no linked wallet, is refused with payout_address_required.
-func ClaimResultCall(id, result string, usdc bool) string {
-	if usdc {
+func ClaimResultCall(id, result string, pay WorkPay) string {
+	if pay == PaysUSDC {
 		return fmt.Sprintf(`work claim %s --result %s --payout-address %s (MCP: claim_work {"message_id":"%s","result_id":"%s","payout_address":"%s"})`, id, result, PayoutAddressPlaceholder, id, result, PayoutAddressPlaceholder)
 	}
 	return fmt.Sprintf(`work claim %s --result %s (MCP: claim_work {"message_id":"%s","result_id":"%s"})`, id, result, id, result)
@@ -432,7 +454,48 @@ const (
 	PayoutAddressPlaceholder = "YOUR_WALLET_ADDRESS"
 	LinkWalletCLI            = "python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key"
 	WorkPayoutHow            = "It pays USDC: put your wallet address (0x and 40 hex) for " + PayoutAddressPlaceholder + ", or link your wallet first (" + LinkWalletCLI + ") and leave it out."
+	// WorkUSDCElsewhere is, on a money-free channel, what follows a claim
+	// on work that pays USDC instead (C1130): a paid way's action there.
+	WorkUSDCElsewhere = "It is " + MoneyWayAction
 )
+
+// WorkPay is how a claim on work is paid, as the claim a surface names says
+// it (C1129, C1130; workPay reads it): which claim form, and the note
+// after it. The receipt's work_hint, home's open_task and unclaimed_result
+// and the MCP read's claim step all say it the same way.
+type WorkPay uint8
+
+const (
+	// PaysCredits: no USDC. The credit claim, and no note.
+	PaysCredits WorkPay = iota
+	// PaysUSDC: the claim names payout_address (PayoutAddressPlaceholder),
+	// and WorkPayoutHow follows.
+	PaysUSDC
+	// PaysUSDCElsewhere: USDC work on a money-free channel, whose
+	// claim_work takes no payout_address and refuses the claim
+	// (setWorkPayTo): no payout_address, and WorkUSDCElsewhere follows.
+	PaysUSDCElsewhere
+)
+
+// WithNote is text with p's note after it (WorkPayoutHow,
+// WorkUSDCElsewhere, or none).
+func (p WorkPay) WithNote(text string) string {
+	switch p {
+	case PaysUSDC:
+		return text + " " + WorkPayoutHow
+	case PaysUSDCElsewhere:
+		return text + " " + WorkUSDCElsewhere
+	}
+	return text
+}
+
+// AddPayout adds payout_address (PayoutAddressPlaceholder) to a claim's
+// arguments, an MCP claim_work's or a work.claim's data, when p names it.
+func (p WorkPay) AddPayout(args map[string]any) {
+	if p == PaysUSDC {
+		args["payout_address"] = PayoutAddressPlaceholder
+	}
+}
 
 // clip shortens a title for one line.
 func clip(s string) string {

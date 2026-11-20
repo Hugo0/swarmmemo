@@ -29,9 +29,11 @@ const ReadActsTaskChecks = 3
 type ReadActFacts struct {
 	// Task is the first given post that is open public work the reader
 	// could claim now ("" when none), and TaskPaid whether it holds a
-	// reward (credits held or USDC promised).
+	// reward (credits held or USDC promised); TaskPay is how a claim on it
+	// is paid (workPay, C1130).
 	Task     string
 	TaskPaid bool
+	TaskPay  WorkPay
 	// Unanswered are the given posts that are their author's first post
 	// (firstpost.go) and that no one else has replied to.
 	Unanswered map[string]bool
@@ -125,7 +127,8 @@ func (s *Store) ReadActs(ctx context.Context, ids []string, reader string, tasks
 		}
 		if ok {
 			out.Task, out.TaskPaid = id, paidWork[id]
-			break
+			out.TaskPay, err = workPay(ctx, tx, id)
+			return out, err
 		}
 	}
 	return out, nil

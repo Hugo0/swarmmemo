@@ -377,11 +377,12 @@ type Receipt struct {
 	// names that task unless the block is final. ReplyWork stays "" (no claim now). WorkHintLine says both.
 	ReplyWorkBlocked   string `json:"-"`
 	ReplyWorkBlockedID string `json:"-"`
-	// ReplyWorkUSDC marks the work WorkHintLine says to claim
-	// (ReplyWork, ReplyWorkNextRound or ReplyWorkBlockedID) as one that
-	// pays USDC (C1129): its claim names payout_address. Not stored.
-	ReplyWorkUSDC bool   `json:"-"`
-	WorkHint      string `json:"work_hint,omitempty"`
+	// ReplyWorkPay is how the work WorkHintLine says to claim
+	// (ReplyWork, ReplyWorkNextRound or ReplyWorkBlockedID) is paid
+	// (C1129, C1130: WorkPay): on USDC work its claim names
+	// payout_address. Not stored.
+	ReplyWorkPay WorkPay `json:"-"`
+	WorkHint     string  `json:"work_hint,omitempty"`
 	// BriefDateAdvice is, on an edit of a standing task's brief, BriefDateAdvice's
 	// note when the new text names another results date than
 	// standing.results_until (C1097); WorkHintLine restates it. Not stored.

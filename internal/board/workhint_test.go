@@ -250,7 +250,7 @@ func TestReplyToBlockedStandingTaskSaysWhy(t *testing.T) {
 		return run(t, s, signed(key, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "My result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
 	}
 	blockedLine := func(id string, r *Receipt, note string) string {
-		return "This reply is not submitted: Not now on this standing task: " + note + ". If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(id, r.ID, false) + "."
+		return "This reply is not submitted: Not now on this standing task: " + note + ". If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(id, r.ID, PaysCredits) + "."
 	}
 
 	// (1) per_agent_day used.

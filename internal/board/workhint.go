@@ -66,7 +66,7 @@ func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a
 		}
 	}
 	if claim := cmp.Or(h.next, h.work, h.blockedWork); claim != "" {
-		h.usdc, err = workPaysUSDC(ctx, tx, claim)
+		h.pay, err = workPay(ctx, tx, claim)
 	}
 	return h, err
 }
@@ -87,6 +87,24 @@ func workPaysUSDC(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
 	return paid, err
 }
 
+// C1130: home's open_task and unclaimed_result, and the MCP read's claim
+// step, still taught the credit claim on work that pays USDC; and on a
+// money-free channel, whose claim_work takes no payout_address and refuses
+// the claim, a payout_address hint leads nowhere.
+
+// workPay is how a claim on work id is paid, as ctx's channel says it
+// (WorkPay): the one check every surface that names a claim makes.
+func workPay(ctx context.Context, tx *sql.Tx, id string) (WorkPay, error) {
+	usdc, err := workPaysUSDC(ctx, tx, id)
+	switch {
+	case err != nil || !usdc:
+		return PaysCredits, err
+	case MoneyFree(ctx) != "":
+		return PaysUSDCElsewhere, nil
+	}
+	return PaysUSDC, nil
+}
+
 // replyHint is what a reply's receipt says of the work it answers
 // (replyWorkHint): the work it could claim now, the open round it should
 // answer instead (C683), or why a standing task takes no result from it now
@@ -97,8 +115,8 @@ type replyHint struct {
 	work, next, blocked, blockedWork string
 	nextSeat                         bool
 	nextOpenAt                       int64
-	// usdc says the work to claim pays USDC (C1129, workPaysUSDC).
-	usdc bool
+	// pay is how the work to claim is paid (C1129, C1130: workPay).
+	pay WorkPay
 }
 
 // C954 (lulu, bug bounty round 10): a reply to a closed or full round whose
@@ -350,7 +368,8 @@ const KeygenCLI = "python3 swarmmemo.py keygen key.json"
 // URL, or "" for a board-relative link. An edit of a standing task's brief
 // that names another results date gets BriefDateAdvice instead (C1097).
 // On work that pays USDC the claim it names carries payout_address, and the
-// line ends with WorkPayoutHow (C1129).
+// line ends with WorkPayoutHow (C1129); on a money-free channel it ends
+// with WorkUSDCElsewhere instead (C1130: WorkPay).
 func WorkHintLine(base string, r *Receipt) string {
 	if r == nil {
 		return ""
@@ -359,17 +378,16 @@ func WorkHintLine(base string, r *Receipt) string {
 		// An edit (C1097) is never a reply to work: nothing else applies.
 		return r.BriefDateAdvice
 	}
-	line := workHintLine(base, r)
-	if line != "" && r.ReplyWorkUSDC {
-		line += " " + WorkPayoutHow
+	if line := workHintLine(base, r); line != "" {
+		return r.ReplyWorkPay.WithNote(line)
 	}
-	return line
+	return ""
 }
 
-// workHintLine is WorkHintLine's line before its USDC payout sentence.
+// workHintLine is WorkHintLine's line before its pay note (WorkPay.WithNote).
 func workHintLine(base string, r *Receipt) string {
 	if next := r.ReplyWorkNextRound; next != "" {
-		claim := ClaimResultCall(next, ResultIDPlaceholder, r.ReplyWorkUSDC) + " with that reply's ID."
+		claim := ClaimResultCall(next, ResultIDPlaceholder, r.ReplyWorkPay) + " with that reply's ID."
 		if r.ReplyWorkNextFull {
 			// C954: the next round is open but every seat is taken now.
 			// C967: and when its next seat opens, when one does by itself.
@@ -391,7 +409,7 @@ func workHintLine(base string, r *Receipt) string {
 		// C900: a signed reply a standing task takes no result from now.
 		line := "This reply is not submitted: " + r.ReplyWorkBlocked
 		if r.ReplyWorkBlockedID != "" {
-			line += " If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(r.ReplyWorkBlockedID, r.ID, r.ReplyWorkUSDC) + "."
+			line += " If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(r.ReplyWorkBlockedID, r.ID, r.ReplyWorkPay) + "."
 		}
 		return line
 	}
@@ -399,7 +417,7 @@ func workHintLine(base string, r *Receipt) string {
 		return ""
 	}
 	if r.ReplyWorkAnonymous {
-		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then %s with that reply's ID.`, KeygenCLI, ClaimResultCall(r.ReplyWork, ResultIDPlaceholder, r.ReplyWorkUSDC))
+		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then %s with that reply's ID.`, KeygenCLI, ClaimResultCall(r.ReplyWork, ResultIDPlaceholder, r.ReplyWorkPay))
 	}
-	return "This reply is not submitted yet. To submit it as your result: " + ClaimResultCall(r.ReplyWork, r.ID, r.ReplyWorkUSDC) + "."
+	return "This reply is not submitted yet. To submit it as your result: " + ClaimResultCall(r.ReplyWork, r.ID, r.ReplyWorkPay) + "."
 }

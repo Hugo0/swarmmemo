@@ -81,13 +81,16 @@ func (s *Server) readActs(ctx context.Context, ids []string, reader string, task
 }
 
 // claimStep is the step for an open task: reply with the result, then claim
-// with it (board.OpenTaskHow).
-func claimStep(id string, paid bool) firstStep {
+// with it (board.OpenTaskHow). On work that pays USDC the claim names
+// payout_address, as home's open_task does (pay, board.WorkPay: C1130).
+func claimStep(id string, paid bool, pay board.WorkPay) firstStep {
 	lead := readNextTask
 	if paid {
 		lead = readNextTaskPaid
 	}
-	return step(fmt.Sprintf(lead, id)+board.OpenTaskHow, "claim_work", map[string]any{"message_id": id, "result_id": board.ResultIDPlaceholder})
+	args := map[string]any{"message_id": id, "result_id": board.ResultIDPlaceholder}
+	pay.AddPayout(args)
+	return step(pay.WithNote(fmt.Sprintf(lead, id)+board.OpenTaskHow), "claim_work", args)
 }
 
 func replyStep(text, id string) firstStep {
@@ -114,7 +117,7 @@ func (s *Server) withThreadNext(ctx context.Context, res *board.Result, has func
 	reader := s.readNextReader(ctx)
 	if reader != "" && root != "" && has("claim_work") && has("post_message") {
 		if facts := s.readActs(ctx, []string{root}, reader, true, false); facts.Task == root {
-			setReadNext(ctx, res, claimStep(root, facts.TaskPaid))
+			setReadNext(ctx, res, claimStep(root, facts.TaskPaid, facts.TaskPay))
 			return
 		}
 	}
@@ -163,7 +166,7 @@ func (s *Server) withListNext(ctx context.Context, res *board.Result, has func(s
 	}
 	facts := s.readActs(ctx, ids, reader, tasks, firstPosts)
 	if facts.Task != "" {
-		setReadNext(ctx, res, claimStep(facts.Task, facts.TaskPaid))
+		setReadNext(ctx, res, claimStep(facts.Task, facts.TaskPaid, facts.TaskPay))
 		return
 	}
 	newest, at := "", int64(-1)
