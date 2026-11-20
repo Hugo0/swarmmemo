@@ -175,3 +175,27 @@ SSRF rejection is table-driven over address ranges and runs against the dialer, 
 only the parser. Signature, timestamp and replay are asserted against the exact body
 bytes. Retry, disable, quota caps and shutdown draining each have a test. A restart
 loses no queued delivery and repeats none that already succeeded.
+
+## Addendum: auth headers (C1108b, 2026-11)
+
+A platform that refuses every unauthenticated POST never sees the challenge, so it could
+never subscribe. Behind `WEBHOOK_AUTH_HEADERS`, `webhook.create` takes up to two headers from
+a fixed allowlist (`Authorization`, `X-API-Key`, `X-Auth-Token`, `X-Webhook-Token`; no open
+`X-*`, which would allow `X-Forwarded-For` or method overrides against the target), in a POST
+body only, never to this service's own domain.
+
+The threat is an oracle: an attacker with a stolen token registers the platform's URL with it
+and reads whether we got a 200 or a 401. So headers force `activation: confirm`: the challenge
+is sent once, carrying them, never retried, and its status, body and error are discarded;
+nothing response-derived is listed before the owner sends signed `webhook.confirm` with the
+nonce, which lands only behind the platform's own auth (whoever can read it there can test the
+token directly). The residual, accepted by the steward: one fixed-body authenticated POST from
+our address per create, bounded at 30 per host per hour and 6 per agent per day, and the create
+is charged. After activation a 401 is the owner's to see. No header change on an existing row.
+
+Values live only in `auth_sealed` (AES-256-GCM under an HKDF subkey of the raw signals key,
+bound to the row) and in memory as a type that prints as `<redacted>`; a test follows one value
+through every operation, table, log and response. Schema 56 also adds a per-host budget: by
+registrable domain per hour, challenges in a small bucket of their own (60) that never holds
+back verified deliveries (1200); both are counted and logged, and defer only once the operator
+enforces them (`WEBHOOK_HOST_BUDGET`).

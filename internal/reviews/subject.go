@@ -273,6 +273,11 @@ var hostingSuffixes = []string{
 
 var domainSuffixes = append(slices.Clone(trust.DefaultParams().DomainSuffixes), hostingSuffixes...)
 
+// DomainSuffixes is the suffix list RegistrableDomain folds by, for a
+// caller that must fold a name RegistrableDomain refuses (the webhook
+// sender's per-host budget) the same way.
+func DomainSuffixes() []string { return slices.Clone(domainSuffixes) }
+
 // RegistrableDomain is host's registrable domain under the trust module's
 // suffix list and the shared hosting platforms; "" for a host that is not a
 // public DNS name.

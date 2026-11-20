@@ -457,7 +457,8 @@ var dataSpecs = map[string]DataSpec{
 	"delegation.revoke":   objectSpec("schema! int", "generation! string pattern=work_id"),
 	"private_read.create": objectSpec("schema! int", "generation! string pattern=work_id", "access_epoch! string pattern=work_id", "disclosure! string"),
 	"private_read.revoke": objectSpec("schema! int", "generation! string pattern=work_id"),
-	"webhook.create":      objectSpec("schema! int", "url! string limit=webhook_url_bytes", "kinds array"),
+	"webhook.create":      objectSpec("schema! int", "url! string limit=webhook_url_bytes", "kinds array", "headers object", "activation string enum=webhook_activations"),
+	"webhook.confirm":     structSpec(webhookConfirmData{}, "schema!", "subscription_id! pattern=work_id", "nonce! limit=request_id_bytes"),
 	"push.subscribe":      structSpec(pushData{}, "schema!", "endpoint! limit=push_endpoint_bytes", "p256dh!", "auth!", "label limit=push_label_chars"),
 	"spend_limit.set":     structSpec(spendLimitSetData{}, "schema!"),
 

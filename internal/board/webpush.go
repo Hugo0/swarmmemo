@@ -412,8 +412,8 @@ func (s *Store) readPush(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 
 // webPushKeysFor is a browser subscription's push keys, read when the
 // sender claims its delivery; ok is false for a webhook.
-func (s *Store) webPushKeysFor(ctx context.Context, subscription string) (p256dh, auth string, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, "SELECT p256dh,auth FROM webpush_keys WHERE subscription=?", subscription).Scan(&p256dh, &auth)
+func webPushKeysFor(ctx context.Context, q queryer, subscription string) (p256dh, auth string, ok bool, err error) {
+	err = q.QueryRowContext(ctx, "SELECT p256dh,auth FROM webpush_keys WHERE subscription=?", subscription).Scan(&p256dh, &auth)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", false, nil
 	}

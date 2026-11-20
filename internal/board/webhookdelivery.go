@@ -123,47 +123,159 @@ func (d *webhookDelivery) tables() (subscriptions, deliveries string) {
 }
 
 // claimDelivery leases one due row. The lease means a crashed or stopped worker
-// releases its row by expiry instead of stranding it.
+// releases its row by expiry instead of stranding it. The lease, the row's
+// checks and its host's budget (webhookauth.go) are one transaction on the
+// one connection: nothing in it touches the pool. A row whose host is over
+// its hourly budget waits for the next hour and the claim moves on to the
+// next due row, at most webhookClaimTries of them, so one busy host never
+// blocks the queue.
 func (s *Store) claimDelivery(ctx context.Context, now int64) (*webhookDelivery, error) {
-	var d webhookDelivery
 	// Started for web push alone, the sender claims only browsers' rows.
 	only := ""
 	if s.webPushOnly {
 		only = " AND subscription IN (SELECT subscription FROM webpush_keys)"
 	}
-	err := s.db.QueryRowContext(ctx, `UPDATE webhook_deliveries SET leased_until=? WHERE seq=(
+	// WEBHOOK_AUTH_HEADERS off: a subscription with stored headers waits,
+	// never sent bare.
+	if !s.config.Features.WebhookAuthHeaders {
+		only += " AND subscription NOT IN (SELECT id FROM webhook_subscriptions WHERE auth_names<>'')"
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for range webhookClaimTries {
+		d, next, err := s.claimOne(ctx, tx, only, now)
+		if err != nil {
+			return nil, err
+		}
+		if !next {
+			if err = tx.Commit(); err != nil {
+				return nil, err
+			}
+			return d, nil
+		}
+	}
+	// Every try deferred a row: that was work, so the worker keeps draining
+	// (deliverOnce reports it) rather than sleeping a poll per eight rows.
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return nil, errWebhookClaimDeferred
+}
+
+// errWebhookClaimDeferred is claimDelivery's report that it only deferred
+// rows for their hosts' budgets: no delivery to send, but work done.
+var errWebhookClaimDeferred = errors.New("webhook claim deferred rows only")
+
+// claimOne is one step of claimDelivery, on its transaction: the leased row,
+// or nil; next reports a row deferred for its host's budget, so the claim
+// may try the next one.
+func (s *Store) claimOne(ctx context.Context, tx *sql.Tx, only string, now int64) (_ *webhookDelivery, next bool, _ error) {
+	var d webhookDelivery
+	var queued, created int64 // the delivery's and the subscription's created_at
+	var authed bool           // the subscription stores auth headers
+	err := tx.QueryRowContext(ctx, `UPDATE webhook_deliveries SET leased_until=? WHERE seq=(
  SELECT seq FROM webhook_deliveries WHERE next_at<=? AND leased_until<=?`+only+` ORDER BY next_at,seq LIMIT 1)
- RETURNING seq,id,subscription,kind,body,attempts`, now+webhookLeaseSecond, now, now).
-		Scan(&d.seq, &d.id, &d.subscription, &d.kind, &d.body, &d.attempts)
+ RETURNING seq,id,subscription,kind,body,attempts,created_at`, now+webhookLeaseSecond, now, now).
+		Scan(&d.seq, &d.id, &d.subscription, &d.kind, &d.body, &d.attempts, &queued)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	err = s.db.QueryRowContext(ctx, "SELECT url,secret,state,challenge,account FROM webhook_subscriptions WHERE id=?", d.subscription).
-		Scan(&d.url, &d.secret, &d.state, &d.challenge, &d.account)
+	err = tx.QueryRowContext(ctx, "SELECT url,secret,state,challenge,account,created_at,auth_names<>'' FROM webhook_subscriptions WHERE id=?", d.subscription).
+		Scan(&d.url, &d.secret, &d.state, &d.challenge, &d.account, &created, &authed)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && d.state == "disabled") {
-		_, err = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
-		return nil, err
+		_, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+		return nil, false, err
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if d.p256dh, d.auth, d.webpush, err = s.webPushKeysFor(ctx, d.subscription); err != nil {
-		return nil, err
+	if d.p256dh, d.auth, d.webpush, err = webPushKeysFor(ctx, tx, d.subscription); err != nil {
+		return nil, false, err
 	}
 	if d.webpush && !s.WebPushEnabled() {
 		// Push is off (no VAPID key): nothing can be sent to a browser.
-		_, err = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
-		return nil, err
+		_, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+		return nil, false, err
 	}
 	// A pending subscription receives its challenge and nothing else.
 	if d.state == "pending" && d.kind != "challenge" {
-		_, err = s.db.ExecContext(ctx, "UPDATE webhook_deliveries SET leased_until=0,next_at=? WHERE seq=?", now+webhookBaseBackoff, d.seq)
-		return nil, err
+		_, err = tx.ExecContext(ctx, "UPDATE webhook_deliveries SET leased_until=0,next_at=? WHERE seq=?", now+webhookBaseBackoff, d.seq)
+		return nil, false, err
 	}
-	return &d, nil
+	// A header challenge is sent once. One leased again (its worker died, or
+	// its settle failed, after the send may have happened) is dropped
+	// unsent: the subscription waits for webhook.confirm or expires.
+	if d.kind == "challenge" && authed && d.attempts > 0 {
+		_, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+		return nil, false, err
+	}
+	// Every webhook request counts against its host's hour; a browser's push
+	// service is not a host an agent chose. Unverified requests (challenges
+	// and their retries) have their own small bucket, so a create and delete
+	// loop against someone's URL never holds back its verified deliveries.
+	// Both buckets only count and log until WEBHOOK_HOST_BUDGET is on; then
+	// a challenge over its bucket waits, within its pending window, and a
+	// verified delivery over its bucket waits for the next hour, attempts
+	// unchanged, and is dropped after a day. Header challenges are bounded
+	// at create either way (chargeWebhookAuthChallenge).
+	if !d.webpush {
+		host := webhookHost(d.url)
+		next := (now/3600+1)*3600 + rand.Int64N(webhookHostJitter+1)
+		if d.kind == "challenge" {
+			admitted, err := webhookHostAdmit(ctx, tx, webhookChallengeBucket+host, WebhookHostChallengesPerHour, s.config.Features.WebhookHostBudget, now)
+			if err != nil || admitted {
+				if err == nil {
+					err = markHeaderChallenge(ctx, tx, &d, authed)
+				}
+				return &d, false, err
+			}
+			if last := created + WebhookPendingTTL - 1; next > last {
+				next = last
+			}
+			if next <= now {
+				// The window ends before the bucket refills: the challenge
+				// ends unsent and the subscription expires as usual.
+				_, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+				return nil, true, err
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE webhook_deliveries SET leased_until=0,next_at=? WHERE seq=?", next, d.seq)
+			return nil, true, err
+		}
+		admitted, err := webhookHostAdmit(ctx, tx, host, WebhookHostRequestsPerHour, s.config.Features.WebhookHostBudget, now)
+		if err != nil {
+			return nil, false, err
+		}
+		if !admitted {
+			if now-queued >= webhookHostDeferMaxAge {
+				if _, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq); err != nil {
+					return nil, false, err
+				}
+				_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET last_error=? WHERE id=?", webhookHostDropped, d.subscription)
+				return nil, true, err
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE webhook_deliveries SET leased_until=0,next_at=? WHERE seq=?", next, d.seq)
+			return nil, true, err
+		}
+	}
+	return &d, false, nil
+}
+
+// markHeaderChallenge records, on the claim's transaction, that a header
+// challenge is being sent (attempts 1), before the request: a second lease
+// of the row, after a crash or a failed settle, then never sends it again.
+// d keeps attempts 0, the one send's.
+func markHeaderChallenge(ctx context.Context, tx *sql.Tx, d *webhookDelivery, authed bool) error {
+	if !authed {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE webhook_deliveries SET attempts=1 WHERE seq=?", d.seq)
+	return err
 }
 
 // claimMCPDelivery leases one due MCP Events row, as claimDelivery does, and
@@ -248,6 +360,22 @@ func (s *Store) send(ctx context.Context, d *webhookDelivery, now int64) (ok, pe
 		setMCPEventHeaders(req.Header, d.id, d.subscription, now, body, secrets...)
 		req.ContentLength = int64(len(body))
 	default:
+		// Stored auth headers (webhookauth.go) are set first and the
+		// contract's last, so no stored name replaces one of ours. They go
+		// only on a confirm-mode subscription's one challenge and on event
+		// deliveries while it is active; never bare instead.
+		headers, err := s.webhookAuthHeaders(ctx, d.subscription)
+		switch {
+		case errors.Is(err, errWebhookAuthUnreadable):
+			return false, true, "", WebhookAuthUnreadable
+		case err != nil:
+			return false, false, "", "auth headers could not be read"
+		case headers != nil && (!s.config.Features.WebhookAuthHeaders || !webhookAuthSendable(d)):
+			return false, true, "", webhookAuthHeld
+		}
+		for _, h := range headers {
+			req.Header.Set(h.Name, h.Value.reveal())
+		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "SwarmMemo-Webhook/1")
 		req.Header.Set("X-SwarmMemo-Delivery", d.id)
@@ -274,6 +402,17 @@ func (s *Store) send(ctx context.Context, d *webhookDelivery, now int64) (ok, pe
 		return false, true, "", status
 	}
 	return false, false, "", status
+}
+
+// webhookAuthHeld is send's reason for a delivery its subscription's stored
+// headers may not go on: it is not sent at all.
+const webhookAuthHeld = "auth headers are not sent on this request"
+
+// webhookAuthSendable reports whether a delivery may carry its
+// subscription's stored headers: the first and only challenge of a pending
+// subscription, or an event while it is active.
+func webhookAuthSendable(d *webhookDelivery) bool {
+	return (d.kind == "challenge" && d.state == "pending" && d.attempts == 0) || (d.kind == "event" && d.state == "active")
 }
 
 // webhookReason keeps a failure description short and free of anything the
@@ -315,6 +454,36 @@ const mcpGoneReason = "status 410"
 
 func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bool, echo, reason string, now int64) error {
 	subscriptions, deliveries := d.tables()
+	if !d.mcp && !d.webpush {
+		// Headers that no longer open: nothing was sent; the owner creates
+		// the subscription again.
+		if reason == WebhookAuthUnreadable {
+			return s.disableUnreadable(ctx, d, now)
+		}
+		if d.kind == "challenge" {
+			headers, confirm, err := s.webhookAuthState(ctx, d.subscription)
+			if err != nil {
+				return err
+			}
+			// The silent branch (webhookauth.go), before any other: a
+			// challenge that carried headers is sent once, and its status,
+			// body and error are discarded. Nothing about the subscription
+			// changes; only webhook.confirm activates it.
+			if headers {
+				_, err = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+				return err
+			}
+			// Confirm-mode without headers: a 2xx alone never activates; a
+			// failure is retried and shown as for echo.
+			if confirm && ok {
+				if _, err = s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET failures=0,last_error='' WHERE id=?", d.subscription); err != nil {
+					return err
+				}
+				_, err = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE seq=?", d.seq)
+				return err
+			}
+		}
+	}
 	if ok && d.kind == "challenge" && !d.mcp {
 		if !strings.Contains(echo, d.challenge) {
 			// Consent was not proven. The subscription stays pending and expires;
@@ -380,8 +549,31 @@ func (s *Store) settle(ctx context.Context, d *webhookDelivery, ok, permanent bo
 	// who needs to be able to read the reason. An MCP receiver's 410 disables
 	// at once; subscribing again (a refresh) reactivates it. So does a push
 	// service's 404 or 410 for a browser (webpush.go), until it opts in again.
-	_, err := s.db.ExecContext(ctx, "UPDATE "+subscriptions+" SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'", now, d.subscription)
+	disable := "UPDATE " + subscriptions + " SET state='disabled',disabled_at=? WHERE id=? AND state<>'disabled'"
+	if !d.mcp {
+		// A disabled row keeps its header names only.
+		disable = "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,auth_sealed=x'' WHERE id=? AND state<>'disabled'"
+	}
+	_, err := s.db.ExecContext(ctx, disable, now, d.subscription)
 	return err
+}
+
+// disableUnreadable disables a subscription whose sealed headers will not
+// open (another key, a damaged row), keeping only their names, and drops
+// its queue.
+func (s *Store) disableUnreadable(ctx context.Context, d *webhookDelivery, now int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,challenge='',auth_sealed=x'',last_error=? WHERE id=? AND state<>'disabled'", now, WebhookAuthUnreadable, d.subscription); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE subscription=?", d.subscription); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // challengeTransient reports whether a failed challenge may be tried again: a
@@ -413,7 +605,9 @@ func (s *Store) retryChallenge(ctx context.Context, d *webhookDelivery, reason s
 	}
 	defer tx.Rollback()
 	var created int64
-	err = tx.QueryRowContext(ctx, "SELECT created_at FROM webhook_subscriptions WHERE id=? AND state='pending'", d.subscription).Scan(&created)
+	// A subscription with stored headers never reaches here (settle's
+	// silent branch); were one to, it is never retried.
+	err = tx.QueryRowContext(ctx, "SELECT created_at FROM webhook_subscriptions WHERE id=? AND state='pending' AND auth_names=''", d.subscription).Scan(&created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -457,6 +651,9 @@ func (s *Store) deliverOnce(ctx context.Context) (bool, error) {
 	d, err := first(ctx, now)
 	if err == nil && d == nil {
 		d, err = second(ctx, now)
+	}
+	if errors.Is(err, errWebhookClaimDeferred) {
+		return true, nil // only deferred rows: work, so keep draining
 	}
 	if err != nil || d == nil {
 		return d != nil, err
@@ -548,8 +745,11 @@ const webhookExpiredSQL = "(state='disabled' AND confirmed_at=0)"
 func (s *Store) expireWebhooks(ctx context.Context) {
 	now := s.now().Unix()
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_deliveries WHERE subscription IN (SELECT id FROM webhook_subscriptions WHERE state='pending' AND created_at<?)", now-WebhookPendingTTL)
-	_, _ = s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,challenge='',last_error=CASE WHEN last_error='' THEN 'challenge not confirmed in time' ELSE last_error END WHERE state='pending' AND created_at<?", now, now-WebhookPendingTTL)
+	// A subscription with stored headers expires with one reason whatever
+	// its endpoint answered, and keeps their names only.
+	_, _ = s.db.ExecContext(ctx, "UPDATE webhook_subscriptions SET state='disabled',disabled_at=?,challenge='',auth_sealed=x'',last_error=CASE WHEN last_error='' OR auth_names<>'' THEN '"+webhookNotConfirmed+"' ELSE last_error END WHERE state='pending' AND created_at<?", now, now-WebhookPendingTTL)
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_rates WHERE hour<?", now/3600-24)
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM webhook_host_rates WHERE hour<?", now/3600-24)
 	// MCP Events: work queued for a subscription that expired or was disabled
 	// will never be sent. The row itself stays, listed as expired or disabled.
 	_, _ = s.db.ExecContext(ctx, "DELETE FROM mcp_event_deliveries WHERE subscription IN (SELECT id FROM mcp_event_subscriptions WHERE state<>'active' OR refresh_before<=?)", now)

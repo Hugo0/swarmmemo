@@ -268,6 +268,7 @@ func Build() map[string]any {
 			"updates_reasons":            names(board.UpdatesReasons, func(r board.UpdatesReason) string { return r.Key }),
 			"feedback_ratings":           board.FeedbackRatings,
 			"first_post_values":          board.FirstPostValues,
+			"webhook_activations":        board.WebhookActivations,
 		},
 		"limits":   limits,
 		"patterns": board.ClientPatterns(),

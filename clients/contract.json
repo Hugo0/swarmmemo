@@ -179,6 +179,10 @@
       "not_checked",
       "flaky"
     ],
+    "webhook_activations": [
+      "echo",
+      "confirm"
+    ],
     "work_credit_states": [
       "held",
       "pending",
@@ -336,8 +340,15 @@
     "vouches_active": 256,
     "vouches_per_day": 16,
     "webhook_attempts": 6,
+    "webhook_auth_challenges_per_day": 6,
+    "webhook_confirm_attempts": 5,
     "webhook_deliveries_per_hour": 240,
     "webhook_disable_after_failures": 5,
+    "webhook_header_value_bytes": 512,
+    "webhook_headers": 2,
+    "webhook_host_auth_challenges_per_hour": 30,
+    "webhook_host_challenges_per_hour": 60,
+    "webhook_host_requests_per_hour": 1200,
     "webhook_url_bytes": 512,
     "webhooks": 4,
     "work_answer_bytes": 2048,
@@ -3349,6 +3360,35 @@
         "removed": {}
       }
     },
+    "webhook.confirm": {
+      "fields": [
+        "data"
+      ],
+      "signed": true,
+      "mutation": true,
+      "delegable": false,
+      "wire": "https",
+      "data": {
+        "fields": {
+          "nonce": {
+            "type": "string",
+            "required": true,
+            "limit": "request_id_bytes"
+          },
+          "schema": {
+            "type": "int",
+            "required": true
+          },
+          "subscription_id": {
+            "type": "string",
+            "required": true,
+            "pattern": "work_id"
+          }
+        },
+        "aliases": {},
+        "removed": {}
+      }
+    },
     "webhook.create": {
       "fields": [
         "data"
@@ -3359,6 +3399,15 @@
       "wire": "https",
       "data": {
         "fields": {
+          "activation": {
+            "type": "string",
+            "required": false,
+            "enum": "webhook_activations"
+          },
+          "headers": {
+            "type": "object",
+            "required": false
+          },
           "kinds": {
             "type": "array",
             "required": false

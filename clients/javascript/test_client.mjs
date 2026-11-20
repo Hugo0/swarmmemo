@@ -424,6 +424,8 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
     [() => signed.webhookCreate('https://example.org/hook', {kinds: ['room_activity', 'reply'], requestId: 'hook-2'}), {operation: 'webhook.create', request_id: 'hook-2', data: '{"schema":1,"url":"https://example.org/hook","kinds":["room_activity","reply"]}'}],
     [() => signed.webhooks({limit: 5}), {operation: 'webhook.list', limit: 5}],
     [() => signed.webhookDelete('s'.repeat(32), {requestId: 'hook-3'}), {operation: 'webhook.delete', target: 's'.repeat(32), request_id: 'hook-3'}],
+    [() => signed.webhookCreate('https://example.org/hook', {headers: {Authorization: 'Bearer t'}, requestId: 'hook-4'}), {operation: 'webhook.create', request_id: 'hook-4', data: '{"schema":1,"url":"https://example.org/hook","headers":{"Authorization":"Bearer t"}}'}],
+    [() => signed.webhookConfirm('s'.repeat(32), 'n'.repeat(32), {requestId: 'hook-5'}), {operation: 'webhook.confirm', request_id: 'hook-5', data: `{"schema":1,"subscription_id":"${'s'.repeat(32)}","nonce":"${'n'.repeat(32)}"}`}],
     [() => signed.withdraw('e'.repeat(32), {requestId: 'withdraw-1'}), {operation: 'message.withdraw', message_id: 'e'.repeat(32), request_id: 'withdraw-1'}],
     [() => signed.updates({records: 'include'}), {operation: 'updates.get', target: fixtureKey.fingerprint, data: '{"schema":1,"records":"include"}'}],
   ];
@@ -450,6 +452,7 @@ test('allowance, memory, trust and vouch helpers send the documented command sha
   await assert.rejects(signed.memoryPut('k', 'v', {visibility: 'team'}), errorCode('invalid_option'));
   await assert.rejects(signed.vouch(agent, {value: 2}), errorCode('invalid_option'));
   await assert.rejects(signed.webhookCreate('https://example.org/hook', {kinds: 'reply'}), errorCode('invalid_option'));
+  await assert.rejects(signed.webhookCreate('https://example.org/hook', {headers: {Authorization: 7}}), errorCode('invalid_option'));
   await assert.rejects(signed.memoryPut('k', 'v', {maxCost: 1.5}), errorCode('invalid_option'));
   assert.equal(bodies.length, 0);
 });
@@ -920,6 +923,7 @@ const JS_WRAPPERS = {
   'allowance.transfer': [(c, o) => c.transfer(P.agent, 5, {resource: 'credit', ...o}), ['resource']],
   vouch: [(c, o) => c.vouch(P.agent, o), ['value', 'sponsor']],
   'webhook.create': [(c, o) => c.webhookCreate('https://example.org/hook', o), ['url']],
+  'webhook.confirm': [(c, o) => c.webhookConfirm(P.message, 'n1', o), ['subscription_id', 'nonce']],
   'conversation.get': [(c, o) => c.conversation(P.room, o), []],
   'conversation.open': [(c, o) => c.openConversation({members: [P.agent], ...o}), ['kind', 'sealed']],
   'conversation.respond': [(c, o) => c.respond(P.room, 'accept', o), ['action']],

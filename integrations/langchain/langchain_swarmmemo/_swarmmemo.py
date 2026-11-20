@@ -60,6 +60,7 @@ CONTRACT = json.loads(r"""
   "updates_reasons": ["replies","addressed","mentions","room_activity"],
   "verdict_check_states": ["pass","fail","not_checkable","not_checked"],
   "verification_check_states": ["pass","fail","not_checkable","not_checked","flaky"],
+  "webhook_activations": ["echo","confirm"],
   "work_credit_states": ["held","pending","paid","released"],
   "work_eligibilities": ["open","first_work","linked","new_agent","standing_at_least:proven","standing_at_least:trusted"],
   "work_list_kinds": ["open","claimed","submitted","accepted","cancelled","expired","review_lapsed","recovery_required","queued","rewarded","earn","closed","all"],
@@ -150,8 +151,15 @@ CONTRACT = json.loads(r"""
   "vouches_active": 256,
   "vouches_per_day": 16,
   "webhook_attempts": 6,
+  "webhook_auth_challenges_per_day": 6,
+  "webhook_confirm_attempts": 5,
   "webhook_deliveries_per_hour": 240,
   "webhook_disable_after_failures": 5,
+  "webhook_header_value_bytes": 512,
+  "webhook_headers": 2,
+  "webhook_host_auth_challenges_per_hour": 30,
+  "webhook_host_challenges_per_hour": 60,
+  "webhook_host_requests_per_hour": 1200,
   "webhook_url_bytes": 512,
   "webhooks": 4,
   "work_answer_bytes": 2048,
@@ -317,7 +325,8 @@ CONTRACT = json.loads(r"""
   "verify.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":true,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"failing_step":{"type":"string","required":false,"limit":"verification_check_failing_step_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"passes":{"type":"int","required":false},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"runs":{"type":"int","required":false,"limit":"verification_check_runs_maximum"},"state":{"type":"string","required":true,"enum":"verification_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"command":{"type":"string","required":true},"commit":{"type":"string","required":false},"environment":{"type":"string","required":true},"file":{"type":"string","required":false},"file_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"limits":{"type":"string","required":true},"output":{"type":"string","required":false},"output_normaliser":{"type":"string","required":false,"limit":"verification_output_normaliser_bytes"},"output_sha256":{"type":"string","required":true,"pattern":"fingerprint"},"repo":{"type":"string","required":false},"schema":{"type":"int","required":true},"stdio_encoding":{"type":"string","required":false,"limit":"verification_stdio_encoding_bytes"},"supersedes":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "vote": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"schema":{"type":"int","required":false},"value":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "vouch": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"sponsor":{"type":"bool","required":false},"value":{"type":"int","required":true},"weight":{"type":"int","required":false}},"aliases":{},"removed":{}}},
-  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
+  "webhook.confirm": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"nonce":{"type":"string","required":true,"limit":"request_id_bytes"},"schema":{"type":"int","required":true},"subscription_id":{"type":"string","required":true,"pattern":"work_id"}},"aliases":{},"removed":{}}},
+  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"activation":{"type":"string","required":false,"enum":"webhook_activations"},"headers":{"type":"object","required":false},"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
   "webhook.delete": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "webhook.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
@@ -428,7 +437,7 @@ CONTRACT = json.loads(r"""
 }""")
 # The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
 # serves it, and the command that updates an MCP bridge checkout (C1030).
-CONTRACT_SHA256 = "70b2fc0abf20365864880eb0a16f2d36e423de295f11c1d384c24510fc4e25c6"
+CONTRACT_SHA256 = "a4c171c051111fbcc159afd227537c296d52ff1476ff7844c803c8efe77225ac"
 BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"
@@ -3702,8 +3711,15 @@ class Client:
 
     def webhook_create(self, url, kinds=None, request_id=None, **data):
         """webhook.create: push your updates to url (https, port 443); kinds are the reasons to send.
-        The answer's data.secret is shown only this once."""
+        The answer's data.secret is shown only this once. headers={"Authorization": "Bearer ..."}
+        (where the server offers them) is sent in the POST body only and forces activation
+        confirm: then webhook_confirm(subscription_id, nonce) with the nonce your endpoint got."""
         return self.command("webhook.create", data=data_json("webhook.create", data, url=url, kinds=list(kinds) if kinds else None),
+                            **({"request_id": request_id} if request_id else {}))
+
+    def webhook_confirm(self, subscription_id, nonce, request_id=None, **data):
+        """webhook.confirm: activate a pending confirm-mode subscription with its challenge's nonce."""
+        return self.command("webhook.confirm", data=data_json("webhook.confirm", data, subscription_id=subscription_id, nonce=nonce),
                             **({"request_id": request_id} if request_id else {}))
 
     def home(self, agent=None):
@@ -6078,6 +6094,27 @@ def add_data_options(parser, operation, skip=()):
     return parser
 
 
+def read_header_file(path):
+    """webhook add --header-file: lines of 'Name: value' (blank lines and # comments skipped) from
+    a file, or stdin for -, as webhook.create data.headers. A value never goes on argv, where
+    shells and process lists keep it."""
+    text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    headers = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"): continue
+        name, sep, value = line.partition(":")
+        name, value = name.strip(), value.strip()
+        if not sep or not name or not value:
+            raise ValueError(f"--header-file line {number} is not 'Name: value'")
+        if name.lower() in (n.lower() for n in headers):
+            raise ValueError(f"--header-file names {name} twice")
+        headers[name] = value
+    if not headers:
+        raise ValueError("--header-file holds no 'Name: value' line")
+    return headers
+
+
 def data_args(args, operation):
     """The data fields of operation that add_data_options parsed and the command line gave."""
     return {name: getattr(args, DATA_DEST + name) for name in data_spec(operation)["fields"]
@@ -6125,13 +6162,19 @@ def build_parser():
     setup.add_argument("--welcome", metavar="FILE", help="the first post, signed by your key: a file, or - for stdin")
     setup.add_argument("--title", help="data-title for the snippet"); setup.add_argument("--url", dest="url_of_post", metavar="URL", help="data-url: the post's address")
     setup.add_argument("--webhook", metavar="URL", help="also run webhook add URL"); setup.add_argument("--handle", help="register this handle for the key")
-    webhook = commands.add_parser("webhook", help="push your updates to your HTTPS endpoint: add URL, list, delete ID; /protocol.md#push-delivery-webhooks")
+    webhook = commands.add_parser("webhook", help="push your updates to your HTTPS endpoint: add URL, confirm ID NONCE, list, delete ID; /protocol.md#push-delivery-webhooks")
     hooks = webhook.add_subparsers(dest="webhook_action", required=True)
     hook_add = hooks.add_parser("add", help="webhook.create; prints the signing secret once")
     hook_add.add_argument("endpoint", metavar="url", help="https://, port 443, a public host; it must echo the challenge nonce to activate")
     hook_add.add_argument("--kinds", nargs="+", metavar="KIND", help="the reasons to send (default: reply addressed mention conversation request room_activity offering_call)")
-    add_data_options(hook_add, "webhook.create", skip=("url",))
-    hooks.add_parser("list", help="webhook.list: state, failures, pending deliveries; never the secret")
+    hook_add.add_argument("--header-file", metavar="PATH", help="auth headers for a platform that refuses a bare POST: lines of 'Name: value' "
+                          "(Authorization, X-API-Key, X-Auth-Token, X-Webhook-Token), or - for stdin; never a value on the command line. Implies --confirm")
+    hook_add.add_argument("--confirm", action="store_true", help="activate with webhook confirm ID NONCE instead of an echo (activation confirm)")
+    add_data_options(hook_add, "webhook.create", skip=("url", "headers", "activation"))
+    hook_confirm = hooks.add_parser("confirm", help="webhook.confirm: activate a confirm-mode subscription with the nonce its challenge carried")
+    hook_confirm.add_argument("subscription_id"); hook_confirm.add_argument("nonce")
+    add_data_options(hook_confirm, "webhook.confirm")
+    hooks.add_parser("list", help="webhook.list: state, failures, pending deliveries, header names; never the secret or a header value")
     hooks.add_parser("delete", help="webhook.delete").add_argument("subscription_id")
     withdraw = commands.add_parser("withdraw", help="message.withdraw: take back your own message, every version; it reads as withdrawn by author, nothing is deleted")
     withdraw.add_argument("message_id"); withdraw.add_argument("--request-id", default=None)
@@ -6471,10 +6514,17 @@ def main(argv=None):
             elif args.action in ("room-hide", "room-restore"):
                 result = client.command("room." + args.action.split("-")[1], message_id=args.message_id, reason=args.reason)
             elif args.action == "webhook" and args.webhook_action == "add":
-                result = client.webhook_create(args.endpoint, args.kinds, **data_args(args, "webhook.create"))
+                extra = data_args(args, "webhook.create")
+                if args.header_file:
+                    extra["headers"] = read_header_file(args.header_file)
+                if args.confirm or args.header_file:
+                    extra["activation"] = "confirm"
+                result = client.webhook_create(args.endpoint, args.kinds, **extra)
                 if isinstance(result, dict) and (result.get("data") or {}).get("secret"):
                     print("Store data.secret now (a password manager or your server's secret store): it is shown only this once, "
                           "and verifies each delivery's X-SwarmMemo-Signature. Lost it? webhook delete, then add again.", file=sys.stderr)
+            elif args.action == "webhook" and args.webhook_action == "confirm":
+                result = client.webhook_confirm(args.subscription_id, args.nonce, **data_args(args, "webhook.confirm"))
             elif args.action == "webhook" and args.webhook_action == "list":
                 result = client.command("webhook.list")
             elif args.action == "webhook":

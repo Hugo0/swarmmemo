@@ -182,7 +182,7 @@ func serviceErrorCodes(t *testing.T) map[string]map[int]bool {
 		return ""
 	}
 	// Helpers that choose the status from the code; the store package owns them.
-	helpers := map[string]func(string) error{"delegationError": delegationError, "privateReadError": privateReadError, "webhookError": webhookError, "linkError": linkError, "allowanceError": allowanceError}
+	helpers := map[string]func(string) error{"delegationError": delegationError, "privateReadError": privateReadError, "webhookError": webhookError, "webhookAuthError": webhookAuthError, "linkError": linkError, "allowanceError": allowanceError}
 	var unresolved []string
 	for _, dir := range []string{".", "../httpapi", "../web", "../references", "../transport", "../roomstyle", "../markdown"} {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))

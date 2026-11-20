@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -163,6 +164,13 @@ func parseWebhookURL(raw string) (*url.URL, error) {
 	if port := u.Port(); port != "" && port != "443" {
 		return nil, webhookError("invalid_webhook")
 	}
+	// An ASCII host only: a fullwidth or IDN spelling (write it as xn--) is
+	// another string for the same name to every check that compares names.
+	for _, r := range u.Hostname() {
+		if r >= utf8.RuneSelf {
+			return nil, webhookError("invalid_webhook")
+		}
+	}
 	return u, nil
 }
 
@@ -204,64 +212,97 @@ func scanWebhook(row scanner, extra ...any) (webhookSubscription, error) {
 	return s, err
 }
 
-// parseWebhookData accepts only {"schema":1,"url":"https://..."}, and with
-// withKinds (INBOX_ENTRIES=read) an optional "kinds" list; an unknown or
-// repeated field is an error rather than something silently ignored, matching
-// how peer cards and delegation contexts are parsed. kinds is as stored
-// (encodeWebhookKinds): "" when not given.
-func parseWebhookData(raw string, withKinds bool) (string, string, error) {
-	if len(raw) > 1024 || !utf8.ValidString(raw) {
-		return "", "", webhookError("invalid_webhook")
+// webhookCreate is webhook.create's data, parsed: kinds as stored
+// (encodeWebhookKinds, "" when not given), headers nil when none, and the
+// activation ("echo" unless asked for or forced by headers).
+type webhookCreate struct {
+	url, kinds, activation string
+	headers                []authHeader
+}
+
+// parseWebhookData accepts only {"schema":1,"url":"https://..."}, with
+// withKinds (INBOX_ENTRIES=read) an optional "kinds" list, and with withAuth
+// (WEBHOOK_AUTH_HEADERS) optional "headers" and "activation"; an unknown or
+// repeated field is an error rather than something silently ignored,
+// matching how peer cards and delegation contexts are parsed. headers or
+// activation without withAuth is webhook_headers_unavailable. Headers force
+// activation confirm.
+func parseWebhookData(raw string, withKinds, withAuth bool) (webhookCreate, error) {
+	var out webhookCreate
+	limit := 1024
+	if withAuth {
+		limit = webhookDataBytesAuth
+	}
+	if len(raw) > limit || !utf8.ValidString(raw) {
+		return out, webhookError("invalid_webhook")
 	}
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return "", "", webhookError("invalid_webhook")
+		return out, webhookError("invalid_webhook")
 	}
 	seen := map[string]bool{}
-	schema, target := 0, ""
+	schema := 0
 	var kinds []string
 	for decoder.More() {
 		token, err = decoder.Token()
 		name, ok := token.(string)
 		if err != nil || !ok || seen[name] {
-			return "", "", webhookError("invalid_webhook")
+			return out, webhookError("invalid_webhook")
 		}
 		seen[name] = true
 		var value json.RawMessage
 		if err = decoder.Decode(&value); err != nil || string(value) == "null" {
-			return "", "", webhookError("invalid_webhook")
+			return out, webhookError("invalid_webhook")
 		}
 		if !dataTakes("webhook.create", name) {
-			return "", "", webhookError("invalid_webhook")
+			return out, webhookError("invalid_webhook")
 		}
 		switch {
 		case name == "schema":
 			err = json.Unmarshal(value, &schema)
 		case name == "url":
-			err = json.Unmarshal(value, &target)
+			err = json.Unmarshal(value, &out.url)
 		case name == "kinds" && withKinds:
 			if json.Unmarshal(value, &kinds) != nil || kinds == nil {
-				return "", "", webhookKindsError()
+				return out, webhookKindsError()
+			}
+		case (name == "headers" || name == "activation") && !withAuth:
+			return out, webhookAuthError("webhook_headers_unavailable")
+		case name == "headers":
+			if out.headers, err = parseWebhookHeaders(value); err != nil {
+				return out, err
+			}
+		case name == "activation":
+			if json.Unmarshal(value, &out.activation) != nil || !slices.Contains(WebhookActivations, out.activation) {
+				return out, problem(400, "invalid_webhook", "activation is "+strings.Join(WebhookActivations, " or ")+"; headers need confirm.")
 			}
 		default:
-			return "", "", webhookError("invalid_webhook")
+			return out, webhookError("invalid_webhook")
 		}
 		if err != nil {
-			return "", "", webhookError("invalid_webhook")
+			return out, webhookError("invalid_webhook")
 		}
 	}
 	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return "", "", webhookError("invalid_webhook")
+		return out, webhookError("invalid_webhook")
 	}
 	if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
-		return "", "", webhookError("invalid_webhook")
+		return out, webhookError("invalid_webhook")
 	}
 	if !seen["schema"] || !seen["url"] || schema != 1 {
-		return "", "", webhookError("invalid_webhook")
+		return out, webhookError("invalid_webhook")
 	}
-	stored, err := encodeWebhookKinds(kinds)
-	return target, stored, err
+	switch {
+	case out.headers != nil && out.activation == "echo":
+		return out, problem(400, "invalid_webhook", "A subscription with headers activates by webhook.confirm only: leave activation out or send confirm.")
+	case out.headers != nil:
+		out.activation = "confirm"
+	case out.activation == "":
+		out.activation = "echo"
+	}
+	out.kinds, err = encodeWebhookKinds(kinds)
+	return out, err
 }
 
 func webhookSecret() string {
@@ -325,13 +366,31 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		}
 		return Result{Data: map[string]any{"deleted": true, "subscription_id": c.Target}}, nil
 	}
-	target, kinds, err := parseWebhookData(c.Data, s.inboxRead(ctx))
+	withAuth := s.config.Features.WebhookAuthHeaders
+	create, err := parseWebhookData(c.Data, s.inboxRead(ctx), withAuth)
 	if err != nil {
 		return Result{}, err
 	}
-	u, err := parseWebhookURL(target)
+	kinds := create.kinds
+	u, err := parseWebhookURL(create.url)
 	if err != nil {
 		return Result{}, err
+	}
+	if create.headers != nil {
+		// A value in a URL reaches access logs; one sent to ourselves would
+		// be a token for our own API; one without the key cannot be stored.
+		if !slices.Contains(webhookHeaderWires, wireFrom(ctx)) {
+			return Result{}, webhookAuthError("webhook_headers_post_only")
+		}
+		if !webhookHeaderHost(u.String()) {
+			return Result{}, problem(400, "invalid_webhook", "Auth headers go only to a public DNS name of letters, digits and hyphens (no IP address, no underscore).")
+		}
+		if s.ownWebhookHost(u.String()) {
+			return Result{}, problem(400, "invalid_webhook", "Auth headers are never sent to this service's own domain.")
+		}
+		if s.webhookAuth.aead == nil {
+			return Result{}, webhookAuthError("webhook_headers_unavailable")
+		}
 	}
 	if err = s.checkWebhookHost(ctx, u); err != nil {
 		return Result{}, err
@@ -346,16 +405,30 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	if held >= WebhookMaxPerAccount || (sameURL == 0 && expired >= WebhookMaxExpiredPerAccount) {
 		return Result{}, webhookError("webhook_limit")
 	}
+	// A header challenge is counted against its host and agent before
+	// anything is charged; the refusal depends on counts alone.
+	if create.headers != nil {
+		if err = chargeWebhookAuthChallenge(ctx, tx, a.account, webhookHost(u.String()), now); err != nil {
+			return Result{}, err
+		}
+	}
 	if err = s.charge(ctx, tx, a, int64(len(a.canonical))+512, now); err != nil {
 		return Result{}, err
 	}
 	id, secret, nonce := randomID(), webhookSecret(), randomID()
+	authNames, authSealed, authKeyID := "", []byte{}, ""
+	if create.headers != nil {
+		if authNames, authSealed, authKeyID, err = s.sealWebhookAuth(create.headers, id, a.account, u.String()); err != nil {
+			return Result{}, err
+		}
+	}
+	// Reusing an expired row writes every auth column afresh.
 	if sameURL > 0 {
-		_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET id=?,created_by=?,secret=?,state='pending',challenge=?,created_at=?,confirmed_at=0,disabled_at=0,failures=0,last_error='',kinds=? WHERE account=? AND url=? AND "+webhookExpiredSQL,
-			id, a.id, secret, nonce, now, kinds, a.account, u.String())
+		_, err = tx.ExecContext(ctx, "UPDATE webhook_subscriptions SET id=?,created_by=?,secret=?,state='pending',challenge=?,created_at=?,confirmed_at=0,disabled_at=0,failures=0,last_error='',kinds=?,auth_names=?,auth_sealed=?,auth_key_id=?,activation=?,confirm_tries=0 WHERE account=? AND url=? AND "+webhookExpiredSQL,
+			id, a.id, secret, nonce, now, kinds, authNames, authSealed, authKeyID, create.activation, a.account, u.String())
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at,kinds) VALUES(?,?,?,?,?,'pending',?,?,?)",
-			id, a.account, a.id, u.String(), secret, nonce, now, kinds)
+		_, err = tx.ExecContext(ctx, "INSERT INTO webhook_subscriptions(id,account,created_by,url,secret,state,challenge,created_at,kinds,auth_names,auth_sealed,auth_key_id,activation) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?,?)",
+			id, a.account, a.id, u.String(), secret, nonce, now, kinds, authNames, authSealed, authKeyID, create.activation)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -364,7 +437,11 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		return Result{}, err
 	}
 	delivery := randomID()
-	body, err := json.Marshal(map[string]any{"schema": 1, "delivery_id": delivery, "subscription_id": id, "type": "challenge", "nonce": nonce})
+	challenge := map[string]any{"schema": 1, "delivery_id": delivery, "subscription_id": id, "type": "challenge", "nonce": nonce}
+	if create.activation == "confirm" {
+		challenge["activation"], challenge["how"] = "confirm", WebhookConfirmHow
+	}
+	body, err := json.Marshal(challenge)
 	if err != nil {
 		return Result{}, err
 	}
@@ -378,7 +455,12 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 	}
 	// The URL is deliberately not recorded in the audit detail: the audit table is
 	// read by operator tooling and a callback URL can itself carry a token.
-	if err = audit(ctx, tx, c.Operation, a.id, id, "webhook subscription created, pending endpoint echo", now); err != nil {
+	// Header names and values never are.
+	detail := "webhook subscription created, pending endpoint echo"
+	if create.activation == "confirm" {
+		detail = "webhook subscription created, pending webhook.confirm"
+	}
+	if err = audit(ctx, tx, c.Operation, a.id, id, detail, now); err != nil {
 		return Result{}, err
 	}
 	data := map[string]any{
@@ -387,6 +469,13 @@ func (s *Store) changeWebhook(ctx context.Context, tx *sql.Tx, c Command, a acto
 		"challenge":       "A challenge POST is queued; echo its nonce in a 2xx response body to activate this subscription.",
 		"pending_expires": now + WebhookPendingTTL,
 		"notice":          "This secret is shown once. Deliveries carry identifiers only, never message text; fetch the message with your own key.",
+	}
+	if create.activation == "confirm" {
+		data["challenge"] = "A challenge POST is queued (sent once, with your headers, when it has them); send signed webhook.confirm with its subscription_id and nonce to activate this subscription. A 2xx alone never does, and its response is never read."
+	}
+	if withAuth {
+		webhookAuthFields(data, authNames, create.activation)
+		data["headers_listed"] = false
 	}
 	if s.inboxRead(ctx) {
 		data["kinds"] = webhookKindsList(kinds)
@@ -410,16 +499,17 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		return Result{}, webhookError("webhook_delegated")
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT "+webhookColumns+","+deliveryStatusColumns("webhook_deliveries", "s")+
-		",kinds FROM webhook_subscriptions s WHERE account=? AND NOT "+isWebPush+" ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
+		",kinds,auth_names,activation FROM webhook_subscriptions s WHERE account=? AND NOT "+isWebPush+" ORDER BY created_at,id LIMIT ?", a.account, limitValue(c.Limit))
 	if err != nil {
 		return Result{}, err
 	}
 	defer rows.Close()
+	withAuth := s.config.Features.WebhookAuthHeaders
 	list := []map[string]any{}
 	for rows.Next() {
 		var status deliveryStatus
-		var kinds string
-		w, err := scanWebhook(rows, &status.pending, &status.attempts, &status.nextAt, &kinds)
+		var kinds, authNames, activation string
+		w, err := scanWebhook(rows, &status.pending, &status.attempts, &status.nextAt, &kinds, &authNames, &activation)
 		if err != nil {
 			return Result{}, err
 		}
@@ -427,19 +517,33 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		if state == "disabled" && w.Confirmed == 0 {
 			state = "expired"
 		}
+		// Before webhook.confirm nothing derived from a header challenge's
+		// answer is listed (webhookauth.go): no last_error, no queue.
+		hidden := authNames != "" && w.Confirmed == 0
+		if hidden {
+			w.Failures = 0 // settle never counts one before confirm; never listed either
+		}
 		item := map[string]any{"subscription_id": w.ID, "url": w.URL, "state": state, "created_at": w.Created, "consecutive_failures": w.Failures}
 		if w.Confirmed != 0 {
 			item["confirmed_at"] = w.Confirmed
 		}
-		if w.Disabled != 0 {
+		switch {
+		case w.Disabled != 0 && hidden && w.LastError != webhookConfirmExpired && w.LastError != WebhookAuthUnreadable:
+			item["disabled_at"], item["disabled_reason"] = w.Disabled, webhookNotConfirmed
+		case w.Disabled != 0:
 			item["disabled_at"], item["disabled_reason"] = w.Disabled, w.LastError
-		} else if w.LastError != "" {
+		case w.LastError != "" && !hidden:
 			item["last_error"] = w.LastError
 		}
 		if w.State == "pending" {
 			item["pending_expires"] = w.Created + WebhookPendingTTL
 		}
-		status.add(item)
+		if !hidden {
+			status.add(item)
+		}
+		if withAuth {
+			webhookAuthFields(item, authNames, activation)
+		}
 		if s.inboxRead(ctx) {
 			item["kinds"] = webhookKindsList(kinds)
 		}
@@ -449,7 +553,7 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		return Result{}, err
 	}
 	var queued int64
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id=d.subscription WHERE s.account=? AND NOT "+isWebPush, a.account).Scan(&queued); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id=d.subscription WHERE s.account=? AND NOT "+isWebPush+" AND NOT (s.auth_names<>'' AND s.confirmed_at=0)", a.account).Scan(&queued); err != nil {
 		return Result{}, err
 	}
 	used, err := webhookHourUsed(ctx, tx, a.account, now)
@@ -463,13 +567,27 @@ func (s *Store) readWebhooks(ctx context.Context, tx *sql.Tx, c Command, a actor
 		return Result{}, err
 	}
 	// Secrets are never listed. A caller that lost one deletes and recreates.
-	return Result{Data: map[string]any{
+	data := map[string]any{
 		"subscriptions": list, "queued_deliveries": queued,
 		"maximum_subscriptions": WebhookMaxPerAccount, "deliveries_this_hour": used,
 		"maximum_deliveries_per_hour": WebhookMaxDeliveriesHour, "secret_listed": false,
 		"mcp_event_subscriptions": events, "mcp_event_queued_deliveries": eventsQueued,
 		"maximum_mcp_event_subscriptions": MCPEventMaxPerAccount,
-	}}, nil
+	}
+	if withAuth {
+		data["headers_listed"] = false // header values neither; names only
+	}
+	return Result{Data: data}, nil
+}
+
+// webhookAuthFields adds a subscription's header names (never values) and
+// activation to its create result or listing item.
+func webhookAuthFields(item map[string]any, authNames, activation string) {
+	names := []string{}
+	if authNames != "" {
+		names = strings.Split(authNames, ",")
+	}
+	item["headers"], item["activation"] = names, activation
 }
 
 // deliveryStatus is what is still queued for one subscription, so an owner can

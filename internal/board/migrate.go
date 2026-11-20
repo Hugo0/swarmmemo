@@ -308,6 +308,11 @@ func migrateSchema(tx *sql.Tx, version int) error {
 	if _, err := tx.Exec(erasureLogSchema); err != nil {
 		return err
 	}
+	// Schema 56: webhook auth headers, their activation and the per-host
+	// budget (webhookauth.go, C1108b).
+	if err := migrateWebhookAuth56(tx); err != nil {
+		return err
+	}
 	_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d;", SchemaVersion))
 	return err
 }

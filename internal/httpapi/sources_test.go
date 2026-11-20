@@ -361,6 +361,11 @@ func TestCopyStatesLimitsThroughConstants(t *testing.T) {
 		"graph.js|604800":  "seconds in a week, for the weekly timeline",
 		"graph-gl.js|2048": "the camera's world coordinates",
 		"embed-v1.js|2048": "a sanity bound on the host page's data-url, which is never sent",
+		// webhook_host_requests_per_hour is 1200 (C1108b); these are not it.
+		"page.html|1200":        "the Open Graph image's width in pixels",
+		"app.js|1200":           "the g-key chord's timeout in milliseconds",
+		"connect-embed.js|1200": "the delay before the sign-in window closes, in milliseconds",
+		"graph.js|1200":         "the camera animation's duration in milliseconds",
 	}
 	patterns := make([]string, 0, len(forbidden))
 	for pattern := range forbidden {

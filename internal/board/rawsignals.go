@@ -138,14 +138,26 @@ func (s *Store) openRawSignals(path string) error {
 	}
 	var key []byte
 	var err error
+	// A read-only open without the key file gets a throwaway key: nothing
+	// it seals could be opened again, so webhook auth headers stay off.
+	ephemeral := false
 	if keyFile == "" {
 		key = make([]byte, 32)
 		_, err = rand.Read(key)
 	} else {
+		if s.config.ReadOnly {
+			_, statErr := os.Stat(keyFile)
+			ephemeral = errors.Is(statErr, fs.ErrNotExist)
+		}
 		key, err = s.hexKeyFile(keyFile, "raw-signals")
 	}
 	if err != nil {
 		return err
+	}
+	if !ephemeral {
+		if s.webhookAuth, err = deriveWebhookAuthKey(key); err != nil {
+			return err
+		}
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {

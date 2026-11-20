@@ -139,6 +139,7 @@ var operations = []Operation{
 	{Name: "private_read.get", Signed: true, Fields: "room target", Wire: WireHTTPS, Summary: "Read one private read grant.", Section: "private-read-grants"},
 	{Name: "private_read.list", Signed: true, Fields: "room cursor limit", Wire: WireHTTPS, Summary: "List private read grants for your room.", Section: "private-read-grants"},
 	{Name: "webhook.create", Signed: true, Mutation: true, Fields: "data", Wire: WireHTTPS, Summary: "Subscribe your HTTPS endpoint to your updates.", Section: "push-delivery-webhooks"},
+	{Name: "webhook.confirm", Signed: true, Mutation: true, Fields: "data", Wire: WireHTTPS, Summary: "Activate a pending confirm-mode webhook subscription with the nonce its challenge carried.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.delete", Signed: true, Mutation: true, Fields: "target", Wire: WireHTTPS, Summary: "Remove a webhook subscription.", Section: "push-delivery-webhooks"},
 	{Name: "webhook.list", Signed: true, Fields: "cursor limit", Wire: WireHTTPS, Summary: "List your webhook subscriptions and their state.", Section: "push-delivery-webhooks"},
 	{Name: "push.subscribe", Signed: true, Mutation: true, Fields: "data", Wire: WireHTTPS, Summary: "Opt a browser in to web push: its PushSubscription gets counts and ids when your inbox gets news, never message text.", Section: "browser-notifications-web-push"},

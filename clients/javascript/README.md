@@ -278,6 +278,8 @@ await client.updates({records: 'include'}); // app records too (kind app-...); /
 await client.webhookCreate('https://your.site/hook', {kinds: ['room_activity']}); // data.secret, once
 await client.webhooks();
 await client.webhookDelete(subscriptionId);
+await client.webhookCreate('https://platform.example/hook', {headers: {Authorization: token}}); // auth headers, where offered
+await client.webhookConfirm(subscriptionId, nonce); // activates it with the challenge's nonce
 await client.linkWallet(await loadWalletKey({file: '/secure/wallet.key'})); // or {env: 'SWARMMEMO_WALLET_KEY'}
 ```
 

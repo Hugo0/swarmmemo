@@ -163,6 +163,9 @@ type Store struct {
 	signals signalsState
 	// rawSignals is the sealed raw write signals' store (rawsignals.go, C452).
 	rawSignals rawSignalsState
+	// webhookAuth seals webhook auth headers: a subkey of the raw signals
+	// key (webhookauth.go, C1108b).
+	webhookAuth webhookAuthKey
 	// sanctionKeyWarn logs once that network sanctions fail open for want
 	// of the signals key (sanctions.go, C449).
 	sanctionKeyWarn sync.Once
@@ -465,7 +468,14 @@ CREATE TABLE IF NOT EXISTS leases (
 // binary refuses the database (and would serve a withheld leaf with the hash
 // of empty data), so a rollback past 55 needs the pre-deploy snapshot
 // (RUNBOOK "Owner erasure").
-const SchemaVersion = 55
+//
+// 56: webhook auth headers (webhookauth.go, C1108b): webhook_subscriptions
+// auth_names, auth_sealed, auth_key_id, activation and confirm_tries,
+// webhook_rates.auth_challenges and webhook_host_rates. Additive: a
+// schema-55 binary never reads them, but refuses a schema-56 database, so a
+// rollback past 56 needs the pre-deploy snapshot (and would send a header
+// subscription's events bare; RUNBOOK "Webhook auth headers").
+const SchemaVersion = 56
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.
@@ -1289,7 +1299,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 				}
 			}
 			if err == nil {
-				if !sameRequest(storedDigest, s.config.ServiceID, cmd, key) {
+				if !sameRequest(storedDigest, s.config.ServiceID, s.digestable(cmd), key) {
 					return empty, problem(409, "idempotency_conflict", "This request ID or nonce already belongs to a different command; use a new identifier.")
 				}
 				var result Result
@@ -1379,7 +1389,8 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 	ctx, revised := withRevisionMark(ctx)
 	result, err := s.execute(ctx, tx, cmd, a, now)
 	if err != nil {
-		s.recordFloodHold(ctx, tx, err, now) // C795: a flood's network hold outlives the refusal
+		s.recordFloodHold(ctx, tx, err, now)   // C795: a flood's network hold outlives the refusal
+		s.recordConfirmMiss(ctx, tx, err, now) // C1108b: a wrong webhook.confirm nonce counts
 		return empty, err
 	}
 	// C664: a masked app room's members read aliases, never keys, on
@@ -1402,7 +1413,7 @@ func (s *Store) executeCommand(ctx context.Context, cmd Command, source string) 
 			return empty, err
 		}
 		for _, key := range keys {
-			if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, requestDigest(s.config.ServiceID, cmd, key), string(encoded), now); err != nil {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES(?,?,?,?,?)", a.requestNamespace, key, requestDigest(s.config.ServiceID, s.digestable(cmd), key), string(encoded), now); err != nil {
 				return empty, err
 			}
 		}
@@ -1565,6 +1576,8 @@ func (s *Store) execute(ctx context.Context, tx *sql.Tx, c Command, a actor, now
 		return s.readDelegation(ctx, tx, c, a, now)
 	case "webhook.create", "webhook.delete":
 		return s.changeWebhook(ctx, tx, c, a, now)
+	case "webhook.confirm":
+		return s.confirmWebhook(ctx, tx, c, a, now)
 	case "webhook.list":
 		return s.readWebhooks(ctx, tx, c, a, now)
 	case "push.subscribe", "push.unsubscribe":

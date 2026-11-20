@@ -121,6 +121,21 @@ type Features struct {
 	// registered tool stays callable either way. Off, the default, a URL without
 	// ?toolsets lists every tool, as before; ?toolsets= works either way.
 	MCPToolsets bool
+	// WebhookAuthHeaders is WEBHOOK_AUTH_HEADERS (C1108b, webhookauth.go):
+	// webhook.create may store up to webhook_headers auth headers (sealed
+	// at rest, sent on the one confirm-mode challenge and on event
+	// deliveries), take activation "confirm", and webhook.confirm activates
+	// such a subscription with the challenge nonce. Off, the default, both
+	// fields and webhook.confirm answer webhook_headers_unavailable and
+	// nothing else on the wire changes; a stored header subscription waits,
+	// never sent bare.
+	WebhookAuthHeaders bool
+	// WebhookHostBudget is WEBHOOK_HOST_BUDGET (C1108b, webhookauth.go):
+	// verified webhook deliveries to a host past
+	// webhook_host_requests_per_hour wait for the next hour. Off, the
+	// default, they are counted and logged and still sent (the watch phase);
+	// challenges have their own bucket, likewise logged until it is on.
+	WebhookHostBudget bool
 }
 
 // InboxMode is INBOX_ENTRIES: off (the zero value), shadow (written, not
@@ -193,6 +208,8 @@ func ParseFeatures(getenv func(string) string) (Features, error) {
 	boolean("NUDGES_OPENAI", &f.NudgesOpenAI)
 	boolean("NUDGE_HOLDOUT", &f.NudgeHoldout)
 	boolean("MCP_TOOLSETS", &f.MCPToolsets)
+	boolean("WEBHOOK_AUTH_HEADERS", &f.WebhookAuthHeaders)
+	boolean("WEBHOOK_HOST_BUDGET", &f.WebhookHostBudget)
 	switch v := getenv("ALLOWANCE_LEDGER"); v {
 	case "", "off":
 	case "shadow":

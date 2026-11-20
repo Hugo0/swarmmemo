@@ -138,6 +138,7 @@ PY_WRAPPERS = {
     "identity.link": (lambda c, kw: c.link(**{"kind": "domain", "value": "example.org", **kw}), "kwargs"),
     "identity.witness": (lambda c, kw: c.witness(**{"agent": AGENT, "kind": "domain", "value": "example.org", "nonce": "n" * 16, "verdict": "verified", **kw}), "kwargs"),
     "webhook.create": (lambda c, kw: c.webhook_create(**{"url": "https://example.org/hook", **kw}), "kwargs"),
+    "webhook.confirm": (lambda c, kw: c.webhook_confirm(MESSAGE, "n1", **kw), "kwargs"),
     "delegation.create": (None, "enrollment"),
 }
 # The fields each wrapper's call above sends from its own arguments.
@@ -145,7 +146,7 @@ PY_BASE = {
     **{op: {"generation"} for op in PY_WRAPPERS if op.startswith("work.")},
     "work.settle": {"generation", "tx_hash"}, "work.reviewer.set": {"generation", "reviewer"}, "work.successor.set": {"generation", "successor"},
     "work.reveal": {"generation", "answer", "salt"}, "work.promise": {"generation", "amount_usdc"}, "work.off_task.set": {"off_task"},
-    "offering.answer": {"body"}, "offering.refund": {"tx_hash"},
+    "offering.answer": {"body"}, "offering.refund": {"tx_hash"}, "webhook.confirm": {"subscription_id", "nonce"},
 }
 # A field a wrapper takes under another argument: the kwargs that send it.
 ARGUMENTS = {
@@ -260,7 +261,7 @@ class PythonParity(unittest.TestCase):
         # offering_publish: its listing; gate: challenge_data and verify_data).
         for name in ("works", "work_create", "work_claim", "work_submit", "work_accept", "work_reject", "work_cancel", "work_settle", "work_promise",
                      "work_set_reviewer", "offering_answer", "offering_refund", "x402_submit", "updates", "follow_updates", "verify_publish",
-                     "dispose", "mark_read", "review", "find", "vote", "vouch", "transfer", "link", "witness", "webhook_create", "prepare_enrollment"):
+                     "dispose", "mark_read", "review", "find", "vote", "vouch", "transfer", "link", "witness", "webhook_create", "webhook_confirm", "prepare_enrollment"):
             with self.subTest(wrapper=name):
                 kinds = {p.kind for p in inspect.signature(getattr(memo.Client, name)).parameters.values()}
                 self.assertIn(inspect.Parameter.VAR_KEYWORD, kinds, f"Client.{name} has no **data passthrough")
@@ -298,6 +299,7 @@ CLI_COMMANDS = {
     "vote": ["vote", MESSAGE, "up"],
     "allowance.transfer": ["transfer", AGENT, "5", "--resource", "credit"],
     "webhook.create": ["webhook", "add", "https://example.org/hook"],
+    "webhook.confirm": ["webhook", "confirm", MESSAGE, "n1"],
     "verify.publish": ["verify", "publish", "--command", "c", "--env", "e", "--output-sha256", "f" * 64, "--check", "tests=pass", "--limits", "l"],
     "gate.challenge": ["gate", "https://shop.example"],
     "gate.verify": ["gate", "https://shop.example"],
@@ -335,6 +337,7 @@ CLI_COMMANDS = {
 CLI_ARGUMENTS = {
     ("post", "format"): ["--format", "markdown"],
     ("vote", "value"): None, ("allowance.transfer", "resource"): None, ("webhook.create", "url"): None,
+    ("webhook.create", "activation"): ["--confirm"], ("webhook.confirm", "subscription_id"): None, ("webhook.confirm", "nonce"): None,
     ("verify.publish", "command"): None, ("verify.publish", "environment"): None, ("verify.publish", "output_sha256"): None,
     ("verify.publish", "checks"): None, ("verify.publish", "limits"): None,
     ("gate.challenge", "origin"): None, ("gate.challenge", "mode"): ["--agent-task"], ("gate.verify", "challenge"): None,
@@ -366,6 +369,7 @@ CLI_EXCLUDED = {
     ("gate.verify", "wallet"): "sent with --wallet-key FILE, unsigned (test_gate_wallet_key)",
     ("gate.verify", "signature"): "sent with --wallet-key FILE, unsigned (test_gate_wallet_key)",
     ("verify.publish", "output"): "sent with --output FILE --publish-output, the file's exact bytes (test_cli_publishes_output_file)",
+    ("webhook.create", "headers"): "sent with --header-file PATH, never a value on argv (test_cli_webhook_header_file)",
 }
 # Operations without a CLI subcommand of their own, with the reason.
 CLI_NO_COMMAND = {
@@ -440,6 +444,25 @@ class CLIParity(unittest.TestCase):
         self.assertEqual(proof["wallet"], memo.wallet_address(WALLET_KEY))
         self.assertTrue(proof["signature"].startswith("0x") and len(proof["signature"]) == 132)
         self.assertIn("solution", proof)
+
+    def test_cli_webhook_header_file(self):
+        # C1108b: auth headers come from a file (or stdin), never argv; they imply activation confirm.
+        path = Path(self.temp.name) / "headers.txt"
+        path.write_text("# platform token\nAuthorization: Bearer abc def\n\nX-API-Key: k-1\n")
+        self.run_cli(["webhook", "add", "https://example.org/hook", "--header-file", str(path)])
+        self.assertEqual(self.recorder.data("webhook.create"), {"schema": 1, "url": "https://example.org/hook",
+                                                                "headers": {"Authorization": "Bearer abc def", "X-API-Key": "k-1"}, "activation": "confirm"})
+        self.recorder.sent.clear()
+        with patch("sys.stdin", io.StringIO("X-Webhook-Token: t\n")):
+            self.run_cli(["webhook", "add", "https://example.org/hook", "--header-file", "-"])
+        self.assertEqual(self.recorder.data("webhook.create")["headers"], {"X-Webhook-Token": "t"})
+        for bad in ("no colon here\n", "Authorization:\n", "", "A: 1\na: 2\n"):
+            path.write_text(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                memo.read_header_file(str(path))
+        self.assertNotIn("--headers", memo.build_parser().parse_args(["webhook", "add", "https://example.org/hook"]).__dict__)
+        args = memo.build_parser().parse_args(["webhook", "add", "https://example.org/hook"])
+        self.assertNotIn("headers", memo.data_args(args, "webhook.create"))
 
     def test_generated_options_are_typed_from_the_contract(self):
         parser = memo.build_parser()

@@ -231,6 +231,14 @@
       const seen = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { seen.disconnect(); grantsSeen = true; void loadSiteGrants(); } });
       seen.observe($('site-grants'));
     });
+    // Push delivery: the webhooks this key subscribed (webhook.list), read
+    // only once the section is on screen, like the site grants.
+    if ($('webhook-list')) queueMicrotask(() => {
+      if (webhooksSeen) { void loadWebhooks(); return; }
+      if (!('IntersectionObserver' in window)) return;
+      const seen = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { seen.disconnect(); webhooksSeen = true; void loadWebhooks(); } });
+      seen.observe($('push-delivery'));
+    });
     // After the script has run: the backup code below declares its state.
     // Only when the Key & backup section is on screen: the status read shares the
     // restore read's hourly limit, so merely opening Me must not spend it.
@@ -269,6 +277,27 @@
       }
       return row;
     }) : [node('li', 'small muted', 'No sites or worker keys yet. Sign in to a site\'s comment section with SwarmMemo and it shows here.')]));
+  }
+  // Me, Push delivery: each webhook's URL, state and auth header names
+  // (C1108b; never a value: webhook.list has none). A confirm-mode one
+  // still pending waits for webhook.confirm with its challenge nonce.
+  let webhooksEpoch = 0, webhooksSeen = false;
+  async function loadWebhooks() {
+    const host = $('webhook-list'), epoch = ++webhooksEpoch;
+    if (!host || !identity) { host?.replaceChildren(); return; }
+    let list;
+    try { list = (await request({operation: 'webhook.list'}, true)).data?.subscriptions || []; }
+    catch (error) { if (epoch === webhooksEpoch) status('webhook-status', error.message, true); return; }
+    if (epoch !== webhooksEpoch) return;
+    host.replaceChildren(...list.map(h => {
+      const row = node('li'), what = node('span');
+      const state = h.state === 'pending' ? (h.activation === 'confirm' ? 'waiting for confirm (webhook.confirm with the challenge nonce)' : 'waiting for the challenge echo') : String(h.state || '');
+      what.append(node('strong', '', String(h.url || '').replace(/^https:[/][/]/, '')), node('span', 'small muted', ' · ' + state));
+      if ((h.headers || []).length) what.append(node('span', 'small muted', ' · headers: ' + h.headers.join(', ')));
+      if (h.disabled_reason) what.append(node('span', 'small muted', ' · ' + h.disabled_reason));
+      row.append(what);
+      return row;
+    }));
   }
   // Me, Settings: tool history (service.calls), read only when its panel is
   // opened, never on a visit; each entry with its hash to copy and a Cite

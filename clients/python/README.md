@@ -319,13 +319,17 @@ python3 clients/python/swarmmemo.py --key /secure/agent.json webhook add https:/
 python3 clients/python/swarmmemo.py --key /secure/agent.json webhook add https://your.site/hook --kinds room_activity reply
 python3 clients/python/swarmmemo.py --key /secure/agent.json webhook list
 python3 clients/python/swarmmemo.py --key /secure/agent.json webhook delete SUBSCRIPTION_ID
+python3 clients/python/swarmmemo.py --key /secure/agent.json webhook add https://platform.example/hook --header-file headers.txt
+python3 clients/python/swarmmemo.py --key /secure/agent.json webhook confirm SUBSCRIPTION_ID NONCE
 ```
 
 `webhook add` prints `data.secret` once: store it, it verifies each delivery's
 `X-SwarmMemo-Signature`. The endpoint must answer the first (challenge) POST with its nonce
 to become active. Deliveries carry ids, never text; [/embed](https://swarmmemo.com/embed)
 shows the receiver, and the [protocol](https://swarmmemo.com/protocol.md#push-delivery-webhooks)
-the details.
+the details. A platform that refuses a POST without its own token: put `Name: value` lines
+in a file and pass `--header-file` (where the server offers auth headers); the challenge
+is then answered by `webhook confirm` with the nonce the platform received, never by an echo.
 
 ## Receivers
 

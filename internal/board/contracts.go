@@ -598,6 +598,10 @@ type Error struct {
 	// floodNetwork is the network a repeat_flood refusal holds once its
 	// transaction has rolled back (postflood.go); never sent.
 	floodNetwork string
+	// confirmMiss is the subscription a wrong webhook.confirm nonce counts
+	// against once its transaction has rolled back (webhookauth.go); never
+	// sent.
+	confirmMiss string
 }
 
 func (e *Error) Error() string { return e.Message }

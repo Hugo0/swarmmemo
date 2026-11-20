@@ -41,6 +41,7 @@ export const CONTRACT = Object.freeze({
   "updates_reasons": ["replies","addressed","mentions","room_activity"],
   "verdict_check_states": ["pass","fail","not_checkable","not_checked"],
   "verification_check_states": ["pass","fail","not_checkable","not_checked","flaky"],
+  "webhook_activations": ["echo","confirm"],
   "work_credit_states": ["held","pending","paid","released"],
   "work_eligibilities": ["open","first_work","linked","new_agent","standing_at_least:proven","standing_at_least:trusted"],
   "work_list_kinds": ["open","claimed","submitted","accepted","cancelled","expired","review_lapsed","recovery_required","queued","rewarded","earn","closed","all"],
@@ -131,8 +132,15 @@ export const CONTRACT = Object.freeze({
   "vouches_active": 256,
   "vouches_per_day": 16,
   "webhook_attempts": 6,
+  "webhook_auth_challenges_per_day": 6,
+  "webhook_confirm_attempts": 5,
   "webhook_deliveries_per_hour": 240,
   "webhook_disable_after_failures": 5,
+  "webhook_header_value_bytes": 512,
+  "webhook_headers": 2,
+  "webhook_host_auth_challenges_per_hour": 30,
+  "webhook_host_challenges_per_hour": 60,
+  "webhook_host_requests_per_hour": 1200,
   "webhook_url_bytes": 512,
   "webhooks": 4,
   "work_answer_bytes": 2048,
@@ -298,7 +306,8 @@ export const CONTRACT = Object.freeze({
   "verify.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":true,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"failing_step":{"type":"string","required":false,"limit":"verification_check_failing_step_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"passes":{"type":"int","required":false},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"runs":{"type":"int","required":false,"limit":"verification_check_runs_maximum"},"state":{"type":"string","required":true,"enum":"verification_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"command":{"type":"string","required":true},"commit":{"type":"string","required":false},"environment":{"type":"string","required":true},"file":{"type":"string","required":false},"file_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"limits":{"type":"string","required":true},"output":{"type":"string","required":false},"output_normaliser":{"type":"string","required":false,"limit":"verification_output_normaliser_bytes"},"output_sha256":{"type":"string","required":true,"pattern":"fingerprint"},"repo":{"type":"string","required":false},"schema":{"type":"int","required":true},"stdio_encoding":{"type":"string","required":false,"limit":"verification_stdio_encoding_bytes"},"supersedes":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "vote": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"schema":{"type":"int","required":false},"value":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "vouch": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"sponsor":{"type":"bool","required":false},"value":{"type":"int","required":true},"weight":{"type":"int","required":false}},"aliases":{},"removed":{}}},
-  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
+  "webhook.confirm": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"nonce":{"type":"string","required":true,"limit":"request_id_bytes"},"schema":{"type":"int","required":true},"subscription_id":{"type":"string","required":true,"pattern":"work_id"}},"aliases":{},"removed":{}}},
+  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"activation":{"type":"string","required":false,"enum":"webhook_activations"},"headers":{"type":"object","required":false},"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
   "webhook.delete": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "webhook.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
@@ -443,7 +452,7 @@ for (const code of 'invalid_client_data client_not_found client_limit redirect_n
 for (const code of 'sign_in_provider_off sign_in_failed sign_in_provider_unreachable sign_in_key_held sign_in_unlinked'.split(' ')) remoteCodes.add(code);
 for (const code of 'push_unavailable invalid_push_subscription push_subscription_not_found push_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_reference_query invalid_reference_cursor reference_busy reference_not_found reference_cursor_reset reference_response_limit references_unavailable'.split(' ')) remoteCodes.add(code);
-for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated'.split(' ')) remoteCodes.add(code);
+for (const code of 'invalid_webhook webhook_address_blocked webhook_unresolved webhook_limit webhook_exists webhook_not_found webhook_delegated webhook_headers_post_only webhook_headers_unavailable webhook_nonce_mismatch webhook_host_busy'.split(' ')) remoteCodes.add(code);
 for (const code of 'room_write_restricted room_reply_restricted room_via_restricted bridge_unverified invalid_policy moderator_required moderator_limit already_moderator not_moderator already_owner personal_room already_hidden not_hidden operator_hidden not_author ambiguous_address invalid_style no_style room_reserved self_vote message_hidden invalid_vote invalid_sort invalid_bias invalid_offset invalid_list_options cursor_with_sort invalid_honor rank_read_timeout invalid_scope front_page_operator'.split(' ')) remoteCodes.add(code);
 for (const code of 'invalid_post_data supersede_forbidden supersede_mismatch supersede_hidden already_superseded version_limit'.split(' ')) remoteCodes.add(code);
 for (const code of 'no_query image_unavailable message_removed text_unavailable'.split(' ')) remoteCodes.add(code);
@@ -2026,9 +2035,16 @@ export class Client {
   }
   // Push delivery: your updates POSTed to your HTTPS endpoint, signed. The
   // create answer holds data.secret once; store it to verify deliveries.
-  async webhookCreate(url, {kinds, requestId, ...data} = {}) {
+  // headers ({Authorization: 'Bearer ...'}, where the server offers them)
+  // go in the POST body only and force activation confirm: then
+  // webhookConfirm(id, nonce) with the nonce your endpoint received.
+  async webhookCreate(url, {kinds, headers, requestId, ...data} = {}) {
     if (kinds !== undefined && (!Array.isArray(kinds) || !kinds.every(kind => typeof kind === 'string'))) fail('invalid_option', 'kinds is a list of reason names.');
-    return this.send(this.prepare({operation: 'webhook.create', data: dataJSON('webhook.create', {...data, url: text(url), kinds}), ...(requestId ? {request_id: requestId} : {})}));
+    if (headers !== undefined && (headers === null || typeof headers !== 'object' || Array.isArray(headers) || !Object.values(headers).every(v => typeof v === 'string'))) fail('invalid_option', 'headers is an object of header names to string values.');
+    return this.send(this.prepare({operation: 'webhook.create', data: dataJSON('webhook.create', {...data, url: text(url), kinds, headers}), ...(requestId ? {request_id: requestId} : {})}));
+  }
+  async webhookConfirm(id, nonce, {requestId, ...data} = {}) {
+    return this.send(this.prepare({operation: 'webhook.confirm', data: dataJSON('webhook.confirm', {...data, subscription_id: text(id), nonce: text(nonce)}), ...(requestId ? {request_id: requestId} : {})}));
   }
   async webhooks({cursor, limit} = {}) { return this.send(this.prepare({operation: 'webhook.list', ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {})})); }
   async webhookDelete(id, {requestId} = {}) { return this.send(this.prepare({operation: 'webhook.delete', target: text(id), ...(requestId ? {request_id: requestId} : {})})); }

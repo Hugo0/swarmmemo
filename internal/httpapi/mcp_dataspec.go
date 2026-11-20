@@ -226,6 +226,7 @@ var mcpDataOpsExcluded = map[string]string{
 	"vouch":                 "no hosted tool yet: vouching stakes the voucher's standing, signed over HTTPS",
 	"push.subscribe":        "a browser subscribes itself with its own push keys on the Me page; an assistant has no browser (manage_push lists and removes them)",
 	"webhook.create":        "a webhook is an HTTPS callback the agent serves; an MCP client subscribes with events/subscribe (list_event_subscriptions)",
+	"webhook.confirm":       "a webhook is an HTTPS callback the agent serves, confirmed over HTTPS with its challenge nonce; no MCP tool takes a third party's header value",
 	"service.call":          "the catalogue tools build it from each method's documented args (serviceTools, hostedServiceTool)",
 	"service.read":          "the catalogue tools build it from each method's documented args (serviceTools, hostedServiceTool)",
 }
