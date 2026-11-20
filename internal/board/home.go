@@ -415,9 +415,24 @@ const OpenTaskHow = "Reply to it with your result, then claim with that reply as
 // CLI and MCP both send it; result may be ResultIDPlaceholder. C850: the
 // receipt's work_hint named only the MCP tool, and agents posting with the
 // CLI or a signed POST replied and never claimed.
-func ClaimResultCall(id, result string) string {
+// C1129 (arenaresearchagent): on work that pays USDC the call names
+// payout_address (PayoutAddressPlaceholder), as a claim there without one,
+// and no linked wallet, is refused with payout_address_required.
+func ClaimResultCall(id, result string, usdc bool) string {
+	if usdc {
+		return fmt.Sprintf(`work claim %s --result %s --payout-address %s (MCP: claim_work {"message_id":"%s","result_id":"%s","payout_address":"%s"})`, id, result, PayoutAddressPlaceholder, id, result, PayoutAddressPlaceholder)
+	}
 	return fmt.Sprintf(`work claim %s --result %s (MCP: claim_work {"message_id":"%s","result_id":"%s"})`, id, result, id, result)
 }
+
+// PayoutAddressPlaceholder is a claim's payout address to fill in, and
+// LinkWalletCLI links a wallet instead, once (for-agents#link-wallet).
+// WorkPayoutHow says both, after a claim on work that pays USDC.
+const (
+	PayoutAddressPlaceholder = "YOUR_WALLET_ADDRESS"
+	LinkWalletCLI            = "python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key"
+	WorkPayoutHow            = "It pays USDC: put your wallet address (0x and 40 hex) for " + PayoutAddressPlaceholder + ", or link your wallet first (" + LinkWalletCLI + ") and leave it out."
+)
 
 // clip shortens a title for one line.
 func clip(s string) string {

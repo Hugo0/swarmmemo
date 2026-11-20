@@ -113,6 +113,22 @@ func usdcStore(t *testing.T) (*Store, *fakeChain) {
 
 func usdcAsset(s *Store) string { return s.config.WorkUSDC.Asset.String() }
 
+// signedPayoutAddressOf is signedPayoutAddress for account, read in a
+// transaction of its own.
+func signedPayoutAddressOf(t *testing.T, s *Store, account string) string {
+	t.Helper()
+	tx, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	got, err := signedPayoutAddress(t.Context(), tx, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 func workWith(s *Store, key ed25519.PrivateKey, c Command, extra map[string]any) Command {
 	d := map[string]any{"schema": 1, "generation": s.generation}
 	for k, v := range extra {
@@ -289,15 +305,26 @@ func TestWorkUSDCRefusalsVoidAndWalletLink(t *testing.T) {
 		t.Fatalf("refusals left %d USDC rows", n)
 	}
 
-	// Credit-only work: no USDC fields, a payout address is refused, settle
-	// has nothing to settle.
+	// Credit-only work: no USDC fields, a payout address is accepted and
+	// ignored (C1129: it was refused with invalid_work_data, so one claim
+	// script could not serve both kinds), kept nowhere; settle has nothing
+	// to settle.
 	plain := rewardRequest(t, s, owner, "lobby")
 	run(t, s, rewardCreate(s, owner, plain, 50, 0))
 	if w := getTestWork(t, s, plain); w.RewardUSDC != nil || w.RewardState != WorkRewardHeld {
 		t.Fatalf("credit only: %+v %q", w.RewardUSDC, w.RewardState)
 	}
-	fails(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: plain, TTL: 600}, map[string]any{"payout_address": usdcPayee}), "invalid_work_data")
-	fence := claimAndSubmit(t, s, worker, plain, "lobby")
+	plainAck := run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: plain, TTL: 600}, map[string]any{"payout_address": usdcPayee})).Data["ack"].(WorkAck)
+	plainResult := workResult(t, s, worker, plain, "lobby")
+	run(t, s, workWith(s, worker, Command{Operation: "work.submit", MessageID: plain, Amount: plainAck.Fence, Target: plainResult}, map[string]any{"payout_address": usdcPayee}))
+	fence := plainAck.Fence
+	if n := sqlCount(t, s, "SELECT count(*) FROM work_usdc"); n != 0 {
+		t.Fatalf("an ignored payout address left %d USDC rows", n)
+	}
+	// Nor is it an address on record for a later direct reply (C944).
+	if got := signedPayoutAddressOf(t, s, keyID(worker)); got != "" {
+		t.Fatalf("an ignored payout address is on record: %q", got)
+	}
 	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: plain, Amount: fence}))
 	if w := getTestWork(t, s, plain); w.Reward.Receipt == nil || !strings.Contains(w.Reward.Receipt.Statement, WorkRewardSchema) || w.RewardState != WorkRewardPaid {
 		t.Fatalf("credit receipt unchanged: %+v %q", w.Reward, w.RewardState)

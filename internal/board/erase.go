@@ -18,7 +18,8 @@ import (
 // resolve: posts read as tombstones hidden by their author with the reason
 // ErasedReason (the Hugging Face publisher already accepts hidden_by
 // "author"), and keys, profile, links, memory, docs, pastes, files,
-// receivers, webhooks, tool results and write records go. Ledger and payout
+// receivers, webhooks, tool results, stored write answers and write records
+// go, and the values it supplied leave its audit rows. Ledger and payout
 // rows, log leaves and hashes, moderation decisions and sanctions, votes and
 // vouches, signed work transitions and other members' words stay.
 //
@@ -58,6 +59,7 @@ var ErasureKept = []string{
 	"payments, top-ups and bonds with their wallets and transaction hashes (accounting)",
 	"standing proofs' assessments, their values and roots only as keyed hashes (one outside account never makes a second identity)",
 	"activity counts and funnel rows (numbers only, never content)",
+	"the operator's audit trail: operations, keys and times, with the values the account supplied redacted",
 	"other members' messages and replies",
 	"the fingerprint itself, so no one else can claim the erased history",
 }
@@ -90,6 +92,26 @@ var eraseRefRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 // eraseOwn is the account's identity ids and the account itself, as a
 // subquery over ?1.
 const eraseOwn = "(SELECT id FROM identities WHERE account=?1 UNION SELECT ?1)"
+
+// eraseRequestOwn is every requests namespace the account's writes are
+// stored under, as a subquery over ?1 (C1124): its account and key ids
+// (actor.requestNamespace, store.go), their private-read controls
+// ("private-control:", private_read.go) and its worker keys' grants
+// ("delegate:", delegation.go).
+const eraseRequestOwn = "(SELECT id FROM " + eraseOwn + " UNION SELECT 'private-control:'||id FROM " + eraseOwn +
+	" UNION SELECT 'delegate:'||child_id FROM delegations WHERE parent_account IN " + eraseOwn + ")"
+
+// ErasedDetail is what an erasure leaves of an audit row's detail that held
+// a value the account supplied.
+const ErasedDetail = "[erased]"
+
+// eraseAuditOps are the audit operations whose detail is a value the
+// account supplied (C1124): identity links and their witnessing, handles,
+// a file's or a room's closing reason, an event subscription's name. An
+// erasure redacts that detail in the account's rows, as actor or target;
+// the row (operation, keys, time) stays as the operator's record. The other
+// details are counts, ids, hashes, amounts and server text.
+const eraseAuditOps = "'identity.link','identity.unlink','identity.witness','agent.register','handle.claim','blob.delete','room.close','mcp.events.subscribe'"
 
 // EraseObligations lists what keeps an account from being erased: open work
 // it claimed or posted, held credits, and rewards, review fees or USDC
@@ -205,6 +227,10 @@ func (s *Store) EraseAccount(ctx context.Context, tx *sql.Tx, account string, no
 		{"runs_log", "inputs, outputs and errors blanked (hashes kept)", "UPDATE runs_log SET input='',output='',error='',egress='' WHERE account IN " + eraseOwn + " AND (input<>'' OR output<>'' OR error<>'' OR egress<>'')"},
 		{"service_jobs", "finished jobs' data blanked", "UPDATE service_jobs SET data='' WHERE account IN " + eraseOwn + " AND state IN ('done','failed','cancelled') AND data<>''"},
 		{"moderation_jobs", "screened copies blanked (decisions kept)", "UPDATE moderation_jobs SET content='' WHERE agent IN " + eraseOwn + " AND state IN ('done','failed') AND content<>''"},
+		// C1124: the stored answers retries return, and the values the
+		// account supplied in its audit rows.
+		{"requests", "stored write answers removed", "DELETE FROM requests WHERE actor IN " + eraseRequestOwn},
+		{"audit", "supplied values redacted (operations, keys and times kept)", "UPDATE audit SET detail='" + ErasedDetail + "' WHERE operation IN (" + eraseAuditOps + ") AND (actor IN " + eraseOwn + " OR target IN " + eraseOwn + ") AND detail<>'" + ErasedDetail + "'"},
 	}
 	for _, st := range steps {
 		var args []any

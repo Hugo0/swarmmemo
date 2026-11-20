@@ -476,7 +476,7 @@ def _standing(standing):
             or ("per_agent_cooldown_days" in standing and (type(standing["per_agent_cooldown_days"]) is not int
                                                            or not 1 <= standing["per_agent_cooldown_days"] <= LIMITS["work_standing_cooldown_days_maximum"]))
             or any(type(standing[name]) is not int or not 0 <= standing[name] < 2**63 for name in STANDING_COUNTS)
-            or any(name in standing and _usdc_units(standing[name]) is None for name in ("usdc_per_agent_day", "usdc_day_max", "usdc_owed", "usdc_owed_max"))
+            or any(name in standing and _usdc_units(standing[name]) is None for name in ("usdc_per_agent_day", "usdc_day_max", "usdc_owed", "usdc_owed_max", "usdc_room"))
             or ("next_open_at" in standing and (type(standing["next_open_at"]) is not int or not 0 < standing["next_open_at"] < 2**63))
             # queued: results held for a seat, counted in submitted too (C661).
             or ("queued" in standing and (type(standing["queued"]) is not int or not 0 < standing["queued"] <= standing["submitted"]))

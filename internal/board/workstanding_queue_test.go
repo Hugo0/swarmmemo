@@ -305,3 +305,62 @@ func TestWorkStandingQueuedETAAcrossMidnight(t *testing.T) {
 		t.Fatalf("second at its ETA: %s", got)
 	}
 }
+
+// C1127 (9aafa72e): a result queued while every seat is taken meets the
+// USDC caps when it is accepted, after its seat opens, not when it is sent;
+// none is set aside for it. Its ack note says so with the room now
+// (standing.usdc_room), the room reads lower once another result owes USDC,
+// and when its accept finds the cap spent its void reward_usdc says why in
+// plain words (reason_note).
+func TestWorkStandingQueuedResultUSDCCapAtAccept(t *testing.T) {
+	s, _ := usdcStore(t)
+	owner, w1, w2 := keyFor(190), keyFor(191), keyFor(192)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	id := rewardRequest(t, s, owner, "lobby")
+	tiers := []any{map[string]any{"name": "correction", "credits": 300, "usdc": "0.05"}}
+	run(t, s, standingCreate(s, owner, id, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "tiers": tiers, "day_max": 10, "usdc_day_max": "0.05"}, 10*86400))
+	if st := standingAt(t, s, id); st.USDCRoom != "0.05" {
+		t.Fatalf("usdc_room before any accept: %q", st.USDCRoom)
+	}
+
+	r1, c1 := standingClaim(t, s, w1, id, map[string]any{"payout_address": usdcPayee})
+	run(t, s, c1)
+	r2, c2 := standingClaim(t, s, w2, id, map[string]any{"payout_address": usdcOther})
+	ack := run(t, s, c2).Data["ack"].(WorkAck)
+	if ack.State != "queued" || !strings.Contains(ack.Note, "when a result is accepted") || !strings.Contains(ack.Note, "none is set aside when a result is sent or queued") ||
+		!strings.Contains(ack.Note, "Room now: 0.05 USDC.") || !strings.Contains(ack.Note, "standing.usdc_room") {
+		t.Fatalf("queued ack note: %q", ack.Note)
+	}
+
+	// The next day, r1's accept owes the day's USDC and frees the seat: r2
+	// opens with the cap already spent.
+	atTime(s, testTime+86400)
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}))
+	if w := getTestWork(t, s, r2); w.State != "submitted" || w.RewardUSDC == nil || w.RewardUSDC.State != "promised" || w.RewardUSDC.ReasonNote != "" {
+		t.Fatalf("opened result: %+v %+v", w, w.RewardUSDC)
+	}
+	if st := standingAt(t, s, id); st.USDCRoom != "0" {
+		t.Fatalf("usdc_room with the day's cap spent: %q", st.USDCRoom)
+	}
+	run(t, s, workCommand(s, owner, Command{Operation: "work.accept", MessageID: r2, Amount: 1}))
+	w := getTestWork(t, s, r2)
+	if w.RewardUSDC.State != "void" || w.RewardUSDC.Reason != WorkUSDCCapReason || w.RewardUSDC.ReasonNote != USDCVoidWords(WorkUSDCCapReason) ||
+		!strings.Contains(w.RewardUSDC.ReasonNote, "checked when a result is accepted, not when it is sent or queued") {
+		t.Fatalf("capped queued result: %+v", w.RewardUSDC)
+	}
+	// A task without USDC tiers says nothing of USDC.
+	plain := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, plain, map[string]any{"seats": 1, "results_max": WorkStandingResultsMax, "reward": 100, "day_max": 10}, 10*86400))
+	if st := standingAt(t, s, plain); st.USDCRoom != "" {
+		t.Fatalf("usdc_room on a credits-only task: %q", st.USDCRoom)
+	}
+	_, p1 := standingClaim(t, s, w1, plain, nil)
+	run(t, s, p1)
+	_, p2 := standingClaim(t, s, w2, plain, nil)
+	if note := run(t, s, p2).Data["ack"].(WorkAck).Note; strings.Contains(note, "USDC") {
+		t.Fatalf("credits-only queued note names USDC: %q", note)
+	}
+	if err := s.Integrity(testContext); err != nil {
+		t.Fatal(err)
+	}
+}

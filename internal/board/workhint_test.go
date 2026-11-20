@@ -2,6 +2,7 @@ package board
 
 import (
 	"crypto/ed25519"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -249,7 +250,7 @@ func TestReplyToBlockedStandingTaskSaysWhy(t *testing.T) {
 		return run(t, s, signed(key, Command{Operation: "post", Room: "lobby", ReplyTo: id, Text: "My result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
 	}
 	blockedLine := func(id string, r *Receipt, note string) string {
-		return "This reply is not submitted: Not now on this standing task: " + note + ". If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(id, r.ID) + "."
+		return "This reply is not submitted: Not now on this standing task: " + note + ". If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(id, r.ID, false) + "."
 	}
 
 	// (1) per_agent_day used.
@@ -297,4 +298,44 @@ func TestReplyToBlockedStandingTaskSaysWhy(t *testing.T) {
 			t.Fatalf("home offers a blocked reply: %+v", it)
 		}
 	}
+}
+
+// C1129 (arenaresearchagent, #bounties 41707dad): the hint taught the credit
+// claim everywhere, which a task that pays USDC refuses with
+// payout_address_required once the result is posted. A reply to work that
+// pays USDC (a USDC reward, or a standing tier in USDC) now hears the claim
+// with payout_address, and how to fill it in; credit-only work does not.
+func TestWorkHintNamesPayoutAddressOnlyWhereUSDCIsPaid(t *testing.T) {
+	s, _ := usdcStore(t)
+	owner, worker := keyFor(243), keyFor(244)
+	mintCredit(t, s, keyID(owner), allowance.Paid, 5000)
+	reply := func(id string) *Receipt {
+		t.Helper()
+		return run(t, s, signed(worker, Command{Operation: "post", Room: "lobby", ReplyTo: id, Kind: "result", Text: "My result " + randomID()[:8], Timestamp: s.now().Unix()})).Receipt
+	}
+	credit := `This reply is not submitted yet. To submit it as your result: work claim %s --result %s (MCP: claim_work {"message_id":"%s","result_id":"%s"}).`
+	usdc := `This reply is not submitted yet. To submit it as your result: work claim %s --result %s --payout-address YOUR_WALLET_ADDRESS (MCP: claim_work {"message_id":"%s","result_id":"%s","payout_address":"YOUR_WALLET_ADDRESS"}). ` +
+		`It pays USDC: put your wallet address (0x and 40 hex) for YOUR_WALLET_ADDRESS, or link your wallet first (python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key) and leave it out.`
+
+	plainUSDC := rewardRequest(t, s, owner, "lobby")
+	run(t, s, rewardCreate(s, owner, plainUSDC, map[string]any{"credits": 100, "usdc": "0.10"}, 0))
+	tiered := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, tiered, map[string]any{"seats": 2, "tiers": []any{map[string]any{"name": "bug", "credits": 100, "usdc": "0.20"}}}, 10*86400))
+	plainCredit := rewardRequest(t, s, owner, "lobby")
+	run(t, s, rewardCreate(s, owner, plainCredit, 100, 0))
+	creditStanding := rewardRequest(t, s, owner, "lobby")
+	run(t, s, standingCreate(s, owner, creditStanding, map[string]any{"seats": 2, "reward": 200}, 10*86400))
+
+	for _, c := range []struct {
+		id   string
+		want string
+	}{{plainUSDC, usdc}, {tiered, usdc}, {plainCredit, credit}, {creditStanding, credit}} {
+		r := reply(c.id)
+		if got, want := WorkHintLine("", r), fmt.Sprintf(c.want, c.id, r.ID, c.id, r.ID); got != want {
+			t.Errorf("work %s:\n got %q\nwant %q", c.id, got, want)
+		}
+	}
+	// The hinted claim works as printed, with the placeholder filled in.
+	r := reply(tiered)
+	run(t, s, workWith(s, worker, Command{Operation: "work.claim", MessageID: tiered, Target: r.ID}, map[string]any{"payout_address": usdcPayee}))
 }

@@ -73,7 +73,9 @@ func (s *Store) WorkUSDCEnabled() bool { return s.config.WorkUSDC != nil }
 // WorkRewardUSDC is a work's USDC reward as reads show it. State is
 // promised (before accept: the board holds nothing), payable (accepted:
 // owed to PayTo), paid (a verified settlement) or void (no accept: nothing
-// is owed).
+// is owed). A void one names why: Reason, its code, and ReasonNote the same
+// in plain words (USDCVoidWords), so the worker reads it on work.get as the
+// page shows it (C1127).
 type WorkRewardUSDC struct {
 	Amount      string `json:"amount"`
 	Units       int64  `json:"units"`
@@ -92,6 +94,7 @@ type WorkRewardUSDC struct {
 	Block       int64  `json:"block,omitempty"`
 	SettledAt   int64  `json:"settled_at,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+	ReasonNote  string `json:"reason_note,omitempty"`
 }
 
 type usdcRow struct {
@@ -239,13 +242,15 @@ const WorkPayToEarlierWork = "earlier_work"
 
 // signedPayoutAddress is the newest payout_address the account signed
 // itself, with its own key (no grant), in the data of one of its work.claim
-// or work.submit transitions, on any work; "" without one (C944). Never an
-// address read from a post's text.
+// or work.submit transitions, on any work with a USDC reward; "" without one
+// (C944). Never an address read from a post's text, nor one a claim on
+// credit-only work named, which is ignored (C1129).
 func signedPayoutAddress(ctx context.Context, tx *sql.Tx, account string) (string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT d.address FROM (SELECT t.accepted_at AS at,t.rowid AS r,
  CASE WHEN json_valid(json_extract(t.payload,'$.command.data')) THEN json_extract(json_extract(t.payload,'$.command.data'),'$.payout_address') END AS address
  FROM work_transitions t JOIN identities i ON i.id=t.author
- WHERE i.account=? AND t.operation IN ('work.claim','work.submit') AND coalesce(t.delegation_id,'')='') d
+ WHERE i.account=? AND t.operation IN ('work.claim','work.submit') AND coalesce(t.delegation_id,'')=''
+ AND EXISTS(SELECT 1 FROM work_usdc u WHERE u.work_id=t.work_id)) d
  WHERE coalesce(d.address,'')<>'' ORDER BY d.at DESC, d.r DESC LIMIT 8`, account)
 	if err != nil {
 		return "", err
@@ -290,9 +295,9 @@ func (s *Store) setWorkPayTo(ctx context.Context, tx *sql.Tx, op string, w workR
 		return err
 	}
 	if r == nil {
-		if d.PayoutAddress != "" {
-			return problem(400, "invalid_work_data", "payout_address goes with work that has a USDC reward; this work has none.")
-		}
+		// C1129: a payout_address on work with no USDC reward is ignored,
+		// so one claim serves both kinds; nothing keeps it (and
+		// signedPayoutAddress reads only work that pays USDC).
 		return nil
 	}
 	if r.State != "promised" {
@@ -351,11 +356,12 @@ func oweWorkUSDC(ctx context.Context, tx *sql.Tx, w workRow, now int64) error {
 
 // USDCVoidWords says in plain words why a reward's USDC is void, by its
 // reason code (reward_usdc.reason); "" for a code it does not know. The work
-// page shows it beside the code (C771).
+// page shows it beside the code (C771), work.get as reward_usdc.reason_note
+// (C1127).
 func USDCVoidWords(reason string) string {
 	switch reason {
 	case WorkUSDCCapReason:
-		return "the accept passed a USDC cap of the standing task, so the result was paid in credits only"
+		return "the accept passed a USDC cap of the standing task (the caps are checked when a result is accepted, not when it is sent or queued), so the result was paid in credits only"
 	case WorkUSDCNoPayoutAddress:
 		return "the worker gave no payout address, so the result was paid in credits only"
 	case "tier":
@@ -739,6 +745,9 @@ func projectWorkUSDC(ctx context.Context, tx *sql.Tx, id, effective string) (*Wo
 		PayTo: r.PayTo, PayToSource: r.PayToSource, AcceptedAt: r.Accepted, TxHash: r.TxHash, TxURL: USDCTxURL(r.Network, r.TxHash), Payer: r.Payer, PaidAmount: r.PaidAmount, Block: r.Block, SettledAt: r.Settled, Reason: r.Reason}
 	if p.State == "promised" && (effective == "expired" || effective == "review_lapsed" || effective == "cancelled") {
 		p.State, p.Reason = "void", effective
+	}
+	if p.State == "void" {
+		p.ReasonNote = USDCVoidWords(p.Reason)
 	}
 	var receipt *WorkRewardReceipt
 	if r.ReceiptHash != "" {

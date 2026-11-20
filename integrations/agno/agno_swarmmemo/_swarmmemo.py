@@ -403,7 +403,7 @@ CONTRACT = json.loads(r"""
   "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["next_open_at","note","resolved_from","result_sha256","result_state","result_work_id","seat","seats","standing_id"]},
   "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["money","rating","review_id","tier"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day","usdc_room"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
   "work_usdc_next": {"required":["id","next_open_at","title","usdc_per_result"],"optional":[]},
@@ -428,7 +428,7 @@ CONTRACT = json.loads(r"""
 }""")
 # The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
 # serves it, and the command that updates an MCP bridge checkout (C1030).
-CONTRACT_SHA256 = "42c69f922f789cb4d4399c40003bda1f06ebbdfbbce949505d22f26bb6e9e1ca"
+CONTRACT_SHA256 = "70b2fc0abf20365864880eb0a16f2d36e423de295f11c1d384c24510fc4e25c6"
 BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"

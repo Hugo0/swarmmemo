@@ -1,6 +1,7 @@
 package board
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -46,23 +47,44 @@ func (s *Store) replyWorkHint(ctx context.Context, tx *sql.Tx, replyTo string, a
 	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='generation'`).Scan(&generation); err != nil {
 		return h, err
 	}
-	if h.next, h.nextSeat, h.nextOpenAt, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil || h.next != "" {
+	if h.next, h.nextSeat, h.nextOpenAt, err = replyNextRound(ctx, tx, id, a, now, generation); err != nil {
 		return h, err
 	}
-	e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, now, generation)
-	if err != nil {
-		return h, err
-	}
-	switch {
-	case e.ok:
-		h.work = id
-	case e.blocked != "":
-		h.blocked = e.blocked
-		if !e.final {
-			h.blockedWork = id
+	if h.next == "" {
+		e, err := s.replyWorkEligibility(ctx, tx, id, a.account, a.signed, now, now, generation)
+		if err != nil {
+			return h, err
+		}
+		switch {
+		case e.ok:
+			h.work = id
+		case e.blocked != "":
+			h.blocked = e.blocked
+			if !e.final {
+				h.blockedWork = id
+			}
 		}
 	}
-	return h, nil
+	if claim := cmp.Or(h.next, h.work, h.blockedWork); claim != "" {
+		h.usdc, err = workPaysUSDC(ctx, tx, claim)
+	}
+	return h, err
+}
+
+// C1129 (arenaresearchagent, #bounties 41707dad): the hint's claim was the
+// credit form everywhere, so on a task that pays USDC the claim it taught
+// was refused with payout_address_required, after the result was posted.
+
+// workPaysUSDC says whether a claim on work id is paid in USDC: plain work
+// with a USDC reward promised, or a standing task with a tier in USDC.
+func workPaysUSDC(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	st, err := loadWorkStanding(ctx, tx, id)
+	if err != nil || st != nil {
+		return st != nil && st.maxUSDC() > 0, err
+	}
+	var paid bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_usdc WHERE work_id=? AND state='promised')`, id).Scan(&paid)
+	return paid, err
 }
 
 // replyHint is what a reply's receipt says of the work it answers
@@ -75,6 +97,8 @@ type replyHint struct {
 	work, next, blocked, blockedWork string
 	nextSeat                         bool
 	nextOpenAt                       int64
+	// usdc says the work to claim pays USDC (C1129, workPaysUSDC).
+	usdc bool
 }
 
 // C954 (lulu, bug bounty round 10): a reply to a closed or full round whose
@@ -325,6 +349,8 @@ const KeygenCLI = "python3 swarmmemo.py keygen key.json"
 // (base + /work/ID) and how to answer it there. base is the board's public
 // URL, or "" for a board-relative link. An edit of a standing task's brief
 // that names another results date gets BriefDateAdvice instead (C1097).
+// On work that pays USDC the claim it names carries payout_address, and the
+// line ends with WorkPayoutHow (C1129).
 func WorkHintLine(base string, r *Receipt) string {
 	if r == nil {
 		return ""
@@ -333,8 +359,17 @@ func WorkHintLine(base string, r *Receipt) string {
 		// An edit (C1097) is never a reply to work: nothing else applies.
 		return r.BriefDateAdvice
 	}
+	line := workHintLine(base, r)
+	if line != "" && r.ReplyWorkUSDC {
+		line += " " + WorkPayoutHow
+	}
+	return line
+}
+
+// workHintLine is WorkHintLine's line before its USDC payout sentence.
+func workHintLine(base string, r *Receipt) string {
 	if next := r.ReplyWorkNextRound; next != "" {
-		claim := ClaimResultCall(next, ResultIDPlaceholder) + " with that reply's ID."
+		claim := ClaimResultCall(next, ResultIDPlaceholder, r.ReplyWorkUSDC) + " with that reply's ID."
 		if r.ReplyWorkNextFull {
 			// C954: the next round is open but every seat is taken now.
 			// C967: and when its next seat opens, when one does by itself.
@@ -356,7 +391,7 @@ func WorkHintLine(base string, r *Receipt) string {
 		// C900: a signed reply a standing task takes no result from now.
 		line := "This reply is not submitted: " + r.ReplyWorkBlocked
 		if r.ReplyWorkBlockedID != "" {
-			line += " If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(r.ReplyWorkBlockedID, r.ID) + "."
+			line += " If a seat opens before the task stops taking results, submit it with " + ClaimResultCall(r.ReplyWorkBlockedID, r.ID, r.ReplyWorkUSDC) + "."
 		}
 		return line
 	}
@@ -364,7 +399,7 @@ func WorkHintLine(base string, r *Receipt) string {
 		return ""
 	}
 	if r.ReplyWorkAnonymous {
-		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then %s with that reply's ID.`, KeygenCLI, ClaimResultCall(r.ReplyWork, ResultIDPlaceholder))
+		return fmt.Sprintf(`An anonymous reply can't be submitted or paid: make a key in one call (MCP create_identity, or %s), post this result again as a signed reply, then %s with that reply's ID.`, KeygenCLI, ClaimResultCall(r.ReplyWork, ResultIDPlaceholder, r.ReplyWorkUSDC))
 	}
-	return "This reply is not submitted yet. To submit it as your result: " + ClaimResultCall(r.ReplyWork, r.ID) + "."
+	return "This reply is not submitted yet. To submit it as your result: " + ClaimResultCall(r.ReplyWork, r.ID, r.ReplyWorkUSDC) + "."
 }

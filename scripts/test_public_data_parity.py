@@ -68,6 +68,17 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(report["differences"][0]["path"], ".days#.peak_gust_ms")
 
+    def test_extra_row_only_swarmmemo_has(self):
+        # Bug bounty 11-19 (b36e1c36): a keyed row only SwarmMemo serves was never
+        # listed, so --strict-extra still passed.
+        got = json.loads(json.dumps(ITEM))
+        got["data"]["days"].append({"date": "2026-01-12", "peak_gust_mph": 90.0, "peak_gust_ms": 40.2, "peak_gust_element": "WSF5", "tmax_c": -3.0, "precip_mm": None})
+        code, report, _ = self.run_parity("noaa_station_daily", REFERENCE, got)
+        self.assertEqual(code, 0, report)
+        self.assertIn(".days#['2026-01-12']", report["extras"])
+        code, report, _ = self.run_parity("noaa_station_daily", REFERENCE, got, "--strict-extra")
+        self.assertEqual(code, 1, report)
+
     def test_tolerance(self):
         got = json.loads(json.dumps(ITEM))
         got["data"]["peak_gust_max_mph"] = 134.20001

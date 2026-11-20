@@ -413,7 +413,9 @@ func (s *Store) accountWriteClients(ctx context.Context, account string, from, t
 // WriteSignalsRetentionDays, in bounded batches. The hourly maintenance loop
 // and `swarmmemo maintenance` call it. It also blanks the network hashes of
 // sanctions over for as long (redactSanctionHashes): the same retention, and
-// deletes raw records older than RawSignalRetentionDays (rawsignals.go).
+// deletes raw records older than RawSignalRetentionDays (rawsignals.go) and,
+// when the operator sets a retention period, stored write answers older than
+// it (pruneRequests).
 func (s *Store) PruneWriteSignals(ctx context.Context) (int64, error) {
 	cutoff := s.now().Unix() - WriteSignalsRetentionDays*86400
 	if _, err := s.redactSanctionHashes(ctx, s.now().Unix()); err != nil {
@@ -426,6 +428,9 @@ func (s *Store) PruneWriteSignals(ctx context.Context) (int64, error) {
 		return 0, err
 	} else if n > 0 {
 		slog.Info("Raw write signals removed", "older_than_days", RawSignalRetentionDays, "count", n)
+	}
+	if _, err := s.pruneRequests(ctx); err != nil {
+		return 0, err
 	}
 	var total int64
 	for {
@@ -842,9 +847,11 @@ ORDER BY w.created_at DESC LIMIT ?`, net, s.signals.id, from, to, limit)
 // eraseWriteSignals is owner erasure's step for the write signals (erase.go,
 // C1012): the account's rows go, except those of an object held as evidence,
 // and none while the account is under an active sanction.
-// eraseSignalCount is whether an erasure count is the write records' own,
-// which an account.erase hold does not bind (eraseowner.go).
-func eraseSignalCount(c EraseCount) bool { return c.Store == "write_signals" }
+// eraseSignalCount is whether an erasure count is the write records' own or
+// the stored write answers' (C1124), which an account.erase hold does not
+// bind (eraseowner.go): any write in between adds to them, and the hourly
+// prune takes from them.
+func eraseSignalCount(c EraseCount) bool { return c.Store == "write_signals" || c.Store == "requests" }
 
 func eraseWriteSignals(ctx context.Context, tx *sql.Tx, account string, keep EraseEvidence) (EraseCount, error) {
 	c := EraseCount{Store: "write_signals", Action: "removed"}

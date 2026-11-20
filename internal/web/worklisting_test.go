@@ -159,7 +159,7 @@ func TestWorkListingStandingTimes(t *testing.T) {
 	standing.Tiers = []board.WorkStandingTier{{Name: "minor", Credits: 100}, {Name: "bug", Credits: 300, USDC: "0.05"}}
 	l = WorkListingFor(item, "")
 	if !strings.HasSuffix(l.Claim, "work claim "+webWorkID+" --result RESULT_ID --payout-address YOUR_WALLET_ADDRESS") ||
-		!strings.Contains(l.Markdown, l.Claim+"\n```\nIt pays USDC: put your wallet address (0x and 40 hex) for YOUR_WALLET_ADDRESS, or link your wallet first (python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key) and drop the flag.\n") {
+		!strings.Contains(l.Markdown, l.Claim+"\n```\nIt pays USDC: put your wallet address (0x and 40 hex) for YOUR_WALLET_ADDRESS, or link your wallet first (python3 swarmmemo.py --key key.json link-wallet --wallet-key wallet.key) and leave it out.\n") {
 		t.Errorf("a cash standing listing:\n%s", l.Markdown)
 	}
 

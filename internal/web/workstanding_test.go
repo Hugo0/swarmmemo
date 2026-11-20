@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -280,5 +281,59 @@ func TestWorkSSRStandingBriefDateMismatch(t *testing.T) {
 	st.BriefDateMismatch = ""
 	if body = page(); strings.Contains(body, "The brief says") || strings.Contains(WorkListingFor(root, "").Markdown, "The brief says") {
 		t.Error("a brief with no other date shows the line")
+	}
+}
+
+// C1127: a standing task whose tiers pay USDC says on its page that the
+// caps are checked at accept, with the room now (standing.usdc_room); a
+// queued result's page says the same, read from its standing task; a void
+// USDC row's reason reads in plain words.
+func TestWorkSSRStandingUSDCRoom(t *testing.T) {
+	standingID, resultID := strings.Repeat("c", 32), strings.Repeat("f", 32)
+	st := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 1, PerAgentDay: 1}, DayMax: 3, VerdictTTL: board.WorkStandingVerdictTTL, ResultsUntil: 1788912000,
+		Tiers: []board.WorkStandingTier{{Name: "correction", Credits: 300, USDC: "0.05"}}, USDCDayMax: "0.05", USDCOwed: "0.05", USDCOwedMax: "0.05", USDCRoom: "0"}
+	root := board.Work{ID: standingID, Room: "bounties", Title: "Round 3: corrections", State: "open", StoredState: "open", Eligibility: "open",
+		Reward: &board.WorkReward{Amount: 300, Unit: "credit", State: "held"}, Deadline: 1789171200, Standing: st}
+	result := board.Work{ID: resultID, Room: "bounties", Title: "Round 3: corrections", State: "queued", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Eligibility: "open", StandingID: standingID, Deadline: 1788912000, NextOpenAt: 1788595201}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "works.list":
+			return board.Result{OK: true, Data: map[string]any{"works": []board.Work{}}}, nil
+		case "work.get":
+			if c.MessageID == resultID {
+				return board.Result{OK: true, Data: map[string]any{"work": result}}, nil
+			}
+			return board.Result{OK: true, Data: map[string]any{"work": root}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": c.MessageID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	page := func(id string) string {
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+id, nil))
+		if w.Code != 200 {
+			t.Fatalf("/work/%s: %d", id, w.Code)
+		}
+		return html.UnescapeString(w.Body.String())
+	}
+	line := board.USDCRoomLine("0")
+	if body := page(standingID); !strings.Contains(body, `<p class="small standing-usdc-room">`+line+`</p>`) || !strings.Contains(line, "Room now: 0 USDC.") {
+		t.Errorf("the standing page misses the USDC room line")
+	}
+	if body := page(resultID); !strings.Contains(body, "Nothing more to send. "+line+"</p>") {
+		t.Errorf("the queued result's page misses the USDC room line")
+	}
+	result.State, result.StoredState = "accepted", "accepted"
+	result.RewardUSDC = &board.WorkRewardUSDC{Amount: "0.05", Units: 50000, Unit: "usdc", Network: "base", State: "void", Reason: board.WorkUSDCCapReason}
+	if body := page(resultID); !strings.Contains(body, "void: "+board.USDCVoidWords(board.WorkUSDCCapReason)) {
+		t.Errorf("the capped result's page misses the plain words")
+	}
+	st.Tiers[0].USDC, st.USDCRoom = "", ""
+	if body := page(standingID); strings.Contains(body, "Room now") {
+		t.Error("a credits-only standing task shows a USDC room")
 	}
 }

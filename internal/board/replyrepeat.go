@@ -87,7 +87,8 @@ func checkRepeatReply(ctx context.Context, tx *sql.Tx, room, parent string, a ac
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END, text, created_at FROM events
-WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0 ORDER BY seq DESC LIMIT ?`,
+WHERE reply_to=? AND room=? AND account=? AND created_at>? AND hidden=0
+AND NOT EXISTS (SELECT 1 FROM events s WHERE s.supersedes=events.id AND s.supersedes<>'') ORDER BY seq DESC LIMIT ?`,
 		parent, room, account, now-ReplyRepeatWindowSeconds, replyRepeatScan)
 	if err != nil {
 		return err

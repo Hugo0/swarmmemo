@@ -106,7 +106,7 @@ class OperationTests(unittest.TestCase):
                 "verdict_checks": {"operation": "work.reject", "sequence": 3, "author": fingerprint, "at": 4, "checks": [{"property": "tests", "state": "fail"}]},
                 "last_verdict": {"operation": "work.reject", "sequence": 3, "at": 4, "by": agent, "reason": "missing the CSV"},
                 "standing": {"seats": 10, "open": 7, "submitted": 3, "queued": 1, "owed": 0, "paid": 12, "results": 15, "per_agent_day": 1, "per_result": 2000, "day_max": 10, "opened_today": 2,
-                             "tiers": [{"name": "bug", "credits": 2000, "usdc": "0.2"}, {"name": "bug+fix", "credits": 2000}], "usdc_day_max": "2", "usdc_owed": "0.4", "usdc_owed_max": "2",
+                             "tiers": [{"name": "bug", "credits": 2000, "usdc": "0.2"}, {"name": "bug+fix", "credits": 2000}], "usdc_day_max": "2", "usdc_owed": "0.4", "usdc_owed_max": "2", "usdc_room": "1.6",
                              "verdict_ttl": 259200, "results_until": 9, "results_max": 20, "brief_date_mismatch": "2026-11-22 00:45 UTC"},
                 "standing_id": "9" * 32, "tier": "bug+fix", "worker_subject": "agent:" + "8" * 64,
                 "result_subjects": {"work": "c" * 32, "agent": "agent:" + "8" * 64},

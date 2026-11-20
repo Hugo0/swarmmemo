@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // C1012: an operator erasure over a real engine. The account's posts (every
@@ -380,8 +381,10 @@ func TestEraseOfferings(t *testing.T) {
 
 // eraseAccountColumns are the columns that name an account or one of its
 // keys; every table holding one is either a store EraseAccount handles or
-// listed in eraseKeptTables with the reason it stays.
-var eraseAccountColumns = []string{"account", "agent", "author", "caller", "public_key", "requester", "worker"}
+// listed in eraseKeptTables with the reason it stays. C1124 added the other
+// names the schema gives an account or key column (actor: requests, audit).
+var eraseAccountColumns = []string{"account", "actor", "agent", "author", "caller", "created_by", "first_agent", "from_account", "invitee",
+	"owner", "public_key", "requester", "sponsor", "target_account", "to_account", "used_by", "voter_account", "worker"}
 
 // eraseHandledElsewhere are tables an erasure touches without a count of
 // their own.
@@ -398,6 +401,7 @@ var eraseKeptTables = map[string]string{
 	"agent_days":           "activity counts per day, numbers only",
 	"agent_funnel":         "funnel stages, numbers and labels only",
 	"apps":                 "an app's public name and homepage: a product, its house agents still run",
+	"conversations":        "conversations it opened: other members' messages and the signed opening (keys and a signature) rest on them",
 	"credit_topups":        "payments with wallets and transaction hashes (accounting)",
 	"delegations":          "signed key delegations: public keys only, revoked with the parent's keys",
 	"endorsement_records":  "votes and vouches as weights (other accounts' standing rests on them)",
@@ -407,17 +411,26 @@ var eraseKeptTables = map[string]string{
 	"ledger_entries":       "credit ledger (accounting)",
 	"ledger_holds":         "credit holds (accounting; held credits refuse an erasure)",
 	"ledger_lots":          "credit lots (accounting)",
+	"ledger_transfers":     "credit transfers between accounts (accounting)",
+	"lever_log":            "operator lever records: the actor is the operator",
+	"levers":               "operator levers: the actor is the operator",
 	"members":              "room membership, no content",
 	"moderation_decisions": "moderation decisions (an erasure does not end a sanction)",
+	"moderation_domains":   "moderation's record of a link domain: its state and the first key seen with it",
 	"notary_public_keys":   "the notary's own keys",
 	"oauth_codes":          "one-time sign-in codes that expire within minutes; the sign-ins are revoked",
 	"oauth_signing_keys":   "the server's own signing keys",
 	"offering_calls":       "the other party's record of a paid call, with its own pay_to",
+	"params":               "operator parameter versions: the actor is the operator",
 	"post_mentions":        "other members' posts that mention the account",
 	"private_read_grants":  "signed read grants: public keys only, revoked with the owner's keys",
 	"proof_bonds":          "bonds with wallets and transaction hashes (accounting)",
+	"quota":                "byte quota per day, numbers only",
+	"reports":              "reports it filed, with their reasons: moderation records (an erasure does not end a sanction)",
+	"room_invites":         "invites: a secret's hash, the room and keys; other members' membership rests on them",
 	"room_moderation_log":  "moderation records",
 	"room_moderators":      "room roles; the keys are revoked, so they cannot act",
+	"rooms":                "rooms it created: other members' messages live in them; its keys are revoked, so it cannot act as owner",
 	"runs_network_blocks":  "moderation records on code runs",
 	"runs_reviews":         "moderation reviews of code by hash",
 	"runs_usage":           "run counts per day, numbers only",
@@ -429,10 +442,13 @@ var eraseKeptTables = map[string]string{
 	"tier_grant_log":       "operator grant records (accounting)",
 	"tier_grants":          "operator grants (accounting)",
 	"trust_current":        "trust scores, numbers only",
+	"trust_dividends":      "sponsorship dividends, numbers only",
 	"trust_penalties":      "trust penalties (sanctions)",
 	"trust_penalty_log":    "trust penalty records (sanctions)",
 	"trust_scores":         "trust scores, numbers only",
+	"trust_sponsorships":   "sponsorships as weights (other accounts' standing rests on them)",
 	"votes":                "votes as weights (other accounts' standing rests on them)",
+	"vouches":              "vouches as weights (other accounts' standing rests on them)",
 	"wakeup_notices":       "fired wakeup notices: ids and times, cancelled with the wakeups",
 	"webhook_rates":        "delivery counts per hour, numbers only",
 	"work_review_fees":     "review fees (accounting; fees in flight refuse an erasure)",
@@ -484,6 +500,13 @@ func TestEraseCoversEveryAccountTable(t *testing.T) {
 		}
 	}
 	rows.Close()
+	// C1124: the stored write answers and the audit trail name the account
+	// as actor, and are erased.
+	for _, want := range []string{"requests", "audit"} {
+		if !tables[want] || !handled[want] {
+			t.Errorf("%s: found by an account column %v, handled %v", want, tables[want], handled[want])
+		}
+	}
 	for table := range tables {
 		_, kept := eraseKeptTables[table]
 		switch {
@@ -502,5 +525,148 @@ func TestEraseCoversEveryAccountTable(t *testing.T) {
 		if !all[table] && table != "pastes" {
 			t.Errorf("erasure names store %s, which is no table", table)
 		}
+	}
+}
+
+// C1124: an erasure removes the account's stored write answers under every
+// namespace it writes in (its account, a worker key's grant, its private-read
+// controls), so an identity link's value or a wake-up's private room no
+// longer survives in requests, and redacts the values it supplied in its
+// audit rows (as actor or as target), keeping the rows. Another account's
+// rows stay.
+func TestEraseRemovesStoredAnswersAndAuditValues(t *testing.T) {
+	s := openWakeTest(t, "wakeup")
+	alice, bob, worker := keyFor(211), keyFor(212), keyFor(213)
+	a, b := keyID(alice), keyID(bob)
+	const link, den, handle = "https://alice.example.org/c1124", "alice-den-c1124", "alice-c1124"
+	run(t, s, signed(alice, Command{Operation: "agent.register", Handle: handle, RequestID: "reg-1"}))
+	run(t, s, signed(bob, Command{Operation: "agent.register", Handle: "bob-c1124", RequestID: "reg-1"}))
+	run(t, s, signed(alice, Command{Operation: "identity.link", Data: linkJSON("url", link), RequestID: "link-1"}))
+	run(t, s, signed(alice, Command{Operation: "room.create", Room: den, Visibility: "private", RequestID: "den-1"}))
+	run(t, s, svcCall(alice, "wakeup", "schedule", map[string]any{"key": "den", "on": "room", "room": den}, 1, "wake-1"))
+	run(t, s, signed(alice, Command{Operation: "room.create", Room: "grant-c1124", Visibility: "public", RequestID: "grant-room-1"}))
+	g := enroll(t, s, alice, worker, "grant-c1124", 3600, 1<<20)
+	run(t, s, childCommand(s, worker, g, Command{Operation: "post", Room: "grant-c1124", Visibility: "public", Text: "worker words", RequestID: "w-1"}))
+	run(t, s, signed(bob, Command{Operation: "post", Room: "lobby", Text: "bob words", RequestID: "b-1"}))
+	for _, q := range []string{
+		"INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES('private-control:'||?1,'id:pr-1','d','{\"room\":\"" + den + "\"}',1)",
+		"INSERT INTO audit(operation,actor,target,detail,created_at) VALUES('identity.witness',?2,?1,'identity link witnessed verified: url " + link + "',1)",
+	} {
+		if _, err := s.db.Exec(q, a, b); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	namespaces := "actor IN (?1,'private-control:'||?1,'delegate:'||?2)"
+	own := sqlCount(t, s, "SELECT count(*) FROM requests WHERE "+namespaces, a, keyID(worker))
+	for _, leak := range []string{link, den} {
+		if sqlCount(t, s, "SELECT count(*) FROM requests WHERE instr(result,?)>0", leak) == 0 {
+			t.Fatalf("precondition: no stored answer holds %q", leak)
+		}
+	}
+	if sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor='delegate:'||?", keyID(worker)) == 0 {
+		t.Fatal("precondition: the worker key's post stored no answer")
+	}
+	bobRequests := sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor=?", b)
+	bobAuditQuery := "SELECT count(*) FROM audit WHERE actor=?1 AND target<>?2 AND detail<>?3"
+	bobAudit := sqlCount(t, s, bobAuditQuery, b, a, ErasedDetail)
+
+	r, err := s.OperatorEraseAccount(testContext, a, "req-c1124", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := eraseCount(r, "requests", "removed"); got != own {
+		t.Fatalf("requests count %d, want %d: %+v", got, own, r.Counts)
+	}
+	if eraseCount(r, "audit", "redacted") < 3 {
+		t.Fatalf("audit count: %+v", r.Counts)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM requests WHERE "+namespaces, a, keyID(worker)); n != 0 {
+		t.Fatalf("%d stored answers left for the erased account", n)
+	}
+	for _, leak := range []string{link, den, handle} {
+		if n := sqlCount(t, s, "SELECT count(*) FROM requests WHERE instr(result,?)>0", leak); n != 0 {
+			t.Errorf("a stored answer still holds %q", leak)
+		}
+		if n := sqlCount(t, s, "SELECT count(*) FROM audit WHERE instr(detail,?)>0", leak); n != 0 {
+			t.Errorf("an audit detail still holds %q", leak)
+		}
+	}
+	for _, op := range []string{"identity.link", "agent.register", "identity.witness"} {
+		if n := sqlCount(t, s, "SELECT count(*) FROM audit WHERE operation=?1 AND detail=?2 AND (actor=?3 OR target=?3)", op, ErasedDetail, a); n != 1 {
+			t.Errorf("%s: %d redacted rows, want the row kept and redacted", op, n)
+		}
+	}
+	if sqlCount(t, s, "SELECT count(*) FROM audit WHERE operation='account.erase' AND target=? AND detail LIKE '%receipt %'", a) != 1 {
+		t.Fatal("the erasure's own audit row lost its receipt hash")
+	}
+	if sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor=?", b) != bobRequests || sqlCount(t, s, bobAuditQuery, b, a, ErasedDetail) != bobAudit {
+		t.Fatal("another account's stored answers or audit rows changed")
+	}
+	if former, err := formerHandles(testContext, s.db, a); err != nil || len(former) != 0 {
+		t.Fatalf("former handles after erase: %v %v", former, err)
+	}
+	again, err := s.OperatorEraseAccount(testContext, a, "req-c1124-2", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eraseCount(again, "requests", "removed") != 0 || eraseCount(again, "audit", "redacted") != 0 {
+		t.Fatalf("second run: %+v", again.Counts)
+	}
+}
+
+// C1124: stored write answers are kept for good by default: the hourly
+// prune deletes nothing until the operator sets a retention period (params
+// namespace retention, 0 to RequestRetentionDaysMax days). With one set, it
+// deletes the older answers in batches and keeps younger ones, and a signed
+// exact retry of a pruned write is refused as stale, never run a second time.
+func TestPruneRequestsKeepsTheRetryWindow(t *testing.T) {
+	const days = 30
+	s := openTest(t, Config{})
+	alice := keyFor(214)
+	register(t, s, alice)
+	post := signed(alice, Command{Operation: "post", Room: "lobby", Text: "posted once", RequestID: "once"})
+	first := run(t, s, post).Receipt.ID
+	if again := run(t, s, post).Receipt; again.ID != first || !again.Duplicate {
+		t.Fatalf("a retry in the window: %+v", again)
+	}
+	cutoff := testTime - days*86400
+	if _, err := s.db.Exec(`WITH RECURSIVE n(v) AS (VALUES(0) UNION ALL SELECT v+1 FROM n WHERE v+1<?)
+INSERT INTO requests(actor,request_key,digest,result,created_at) SELECT 'anon:old','id:'||v,'d','{}',? FROM n`, signalPruneBatch+1, cutoff-1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("INSERT INTO requests(actor,request_key,digest,result,created_at) VALUES('anon:young','id:y','d','{}',?)", cutoff); err != nil {
+		t.Fatal(err)
+	}
+	all := sqlCount(t, s, "SELECT count(*) FROM requests")
+	if n, err := s.PruneWriteSignals(testContext); err != nil || sqlCount(t, s, "SELECT count(*) FROM requests") != all {
+		t.Fatalf("the default (keep for good) pruned: %d %v", n, err)
+	}
+	for _, bad := range []string{`{"schema":1,"request_retention_days":-1}`, `{"schema":1,"request_retention_days":3651}`, `{"schema":1}`, `{"schema":2,"request_retention_days":30}`} {
+		if _, err := s.SetAllowanceParams(testContext, RetentionParamsNamespace, []byte(bad), "test", 0); err == nil {
+			t.Errorf("retention params %s accepted", bad)
+		}
+	}
+	if _, err := s.SetAllowanceParams(testContext, RetentionParamsNamespace, []byte(`{"schema":1,"request_retention_days":30}`), "test", 0); err != nil {
+		t.Fatal(err)
+	}
+	kept := sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor IN ('anon:young',?)", keyID(alice))
+	n, err := s.pruneRequests(testContext)
+	if err != nil || n != signalPruneBatch+1 {
+		t.Fatalf("pruned %d, %v", n, err)
+	}
+	if sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor='anon:old'") != 0 || sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor IN ('anon:young',?)", keyID(alice)) != kept {
+		t.Fatal("the prune kept an old answer or took a young one")
+	}
+	// Past the window the hourly maintenance takes the post's answer too.
+	s.now = func() time.Time { return time.Unix(testTime+days*86400+1, 0) }
+	if _, err = s.PruneWriteSignals(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM requests WHERE actor=?", keyID(alice)); n != 0 {
+		t.Fatalf("%d answers kept past the window", n)
+	}
+	fails(t, s, post, "stale_signature")
+	if n := sqlCount(t, s, "SELECT count(*) FROM events WHERE account=? AND text='posted once'", keyID(alice)); n != 1 {
+		t.Fatalf("the pruned write ran again: %d posts", n)
 	}
 }

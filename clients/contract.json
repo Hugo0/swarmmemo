@@ -4639,7 +4639,8 @@
         "usdc_day_max",
         "usdc_owed",
         "usdc_owed_max",
-        "usdc_per_agent_day"
+        "usdc_per_agent_day",
+        "usdc_room"
       ]
     },
     "work_standing_tier": {

@@ -139,6 +139,13 @@ class Comparison:
                     self.diff(f"{path}#{list(k)}", x, None, "element missing in swarmmemo")
                     continue
                 self.compare(x, index[k], f"{path}#")
+            # Rows only SwarmMemo serves are extras, like keys only it has:
+            # listed, and fatal under --strict-extra (bug bounty 11-19).
+            ref_keys = {tuple(x.get(k) for k in keys) for x in ref}
+            for x in got:
+                k = tuple(x.get(k) for k in keys)
+                if k not in ref_keys:
+                    self.extras.append(f"{path}#{list(k)}")
             return
         if len(ref) != len(got):
             self.diff(path, len(ref), len(got), "list length")

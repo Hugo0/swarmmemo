@@ -1825,8 +1825,12 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		if queued.nextOpenAt, err = standingQueuedNextOpen(ctx, tx, w, now); err != nil {
 			return Result{}, err
 		}
+		room, e := standingUSDCRoom(ctx, tx, standing, standingRoot.ID, now)
+		if e != nil {
+			return Result{}, e
+		}
 		ack := WorkAck{WorkID: w.ID, State: "queued", Fence: w.Fence, Generation: w.Generation, ServiceID: s.config.ServiceID, AcceptedAt: now, Deadline: w.Deadline, ResultSHA256: d.ResultSHA256,
-			StandingID: standingRoot.ID, ResultWorkID: w.ID, ResultState: "queued", Seats: standing.Seats, NextOpenAt: queued.nextOpenAt, Note: standingQueueNote(standing, queued, w)}
+			StandingID: standingRoot.ID, ResultWorkID: w.ID, ResultState: "queued", Seats: standing.Seats, NextOpenAt: queued.nextOpenAt, Note: standingQueueNote(standing, queued, w, room)}
 		if named != w.ID {
 			ack.ResolvedFrom = named
 		}

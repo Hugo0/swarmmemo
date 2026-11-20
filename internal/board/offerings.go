@@ -591,7 +591,7 @@ func formerHandles(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, account string) ([]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT au.detail FROM audit au JOIN identities i ON i.id=au.actor
- WHERE i.account=?1 AND au.operation IN ('agent.register','handle.claim') AND au.detail<>''
+ WHERE i.account=?1 AND au.operation IN ('agent.register','handle.claim') AND au.detail NOT IN ('','`+ErasedDetail+`')
  AND NOT EXISTS(SELECT 1 FROM identities h WHERE h.handle=au.detail)
  AND NOT EXISTS(SELECT 1 FROM audit la JOIN identities li ON li.id=la.actor WHERE la.operation IN ('agent.register','handle.claim') AND la.detail=au.detail AND la.seq>au.seq AND li.account<>?1)
  GROUP BY au.detail ORDER BY max(au.seq) DESC LIMIT ?2`, account, formerHandlesMax)

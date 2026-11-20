@@ -32,6 +32,7 @@ type workPage struct {
 	Steps                                    workSteps
 	Redirect                                 string       // set for an edited version: the work's root page
 	Listing                                  *WorkListing // "Share this task": the task's listing, while it takes results (C716)
+	QueuedUSDCRoom                           string       // a queued result's page: its standing task's standing.usdc_room (C1127)
 }
 
 // The one way a paid task is taken, as /work, /work/ID and
@@ -203,6 +204,15 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	// Do not render a partial item on history errors or a private scope mismatch.
 	v.Item = &item
 	v.Steps = stepsFor(item.ID, item.Room)
+	if item.State == "queued" && validWorkID(item.StandingID) {
+		// C1127: its USDC waits on the caps' room at accept; the page says
+		// so with the room now (a failed read only leaves the line out).
+		if res, err := execute(board.Command{Operation: "work.get", MessageID: item.StandingID}); err == nil {
+			if root, ok := res.Data["work"].(board.Work); ok && root.Standing != nil {
+				v.QueuedUSDCRoom = root.Standing.USDCRoom
+			}
+		}
+	}
 	if !WorkListingClosed(item.State) {
 		listing := WorkListingFor(item, "")
 		v.Listing = &listing

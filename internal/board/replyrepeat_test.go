@@ -88,6 +88,26 @@ func TestRepeatReplyRefused(t *testing.T) {
 // counters changed (C1017): refused as the same reply, naming the first and
 // saying it is already on the thread; other words, another parent or a
 // later day pass, and a short reply still compares whole.
+// Bug bounty 11-19 (miaoshou): a reply edited to other text no longer shows its
+// first text, so posting that text again is a new reply, not a repeat.
+func TestRepeatReplyIgnoresSupersededVersions(t *testing.T) {
+	s := openTest(t, Config{})
+	base := time.Unix(testTime, 0)
+	s.now = func() time.Time { return base }
+	asker, worker := keyFor(121), keyFor(122)
+	task := postAs(t, s, asker, Command{Room: "bounties", Text: "Task", RequestID: "task"})
+	first := postAs(t, s, worker, Command{Room: "bounties", ReplyTo: task, Text: "Answer T, with the details.", RequestID: "t1"})
+	postAs(t, s, worker, Command{Room: "bounties", ReplyTo: task, Text: "Answer U, a different text.", Data: `{"schema":1,"supersedes":"` + first + `"}`, RequestID: "t2"})
+	s.now = func() time.Time { return base.Add(10 * time.Minute) }
+	postAs(t, s, worker, Command{Room: "bounties", ReplyTo: task, Text: "Answer T, with the details.", RequestID: "t3"})
+	// The newest version's text is still a repeat.
+	_, err := s.Execute(testContext, signed(worker, Command{Operation: "post", Room: "bounties", ReplyTo: task, Text: "Answer U, a different text.", RequestID: "t4", Timestamp: s.now().Unix()}), "test-origin")
+	var e *Error
+	if !errors.As(err, &e) || e.Code != "duplicate_reply" {
+		t.Fatalf("the visible version's text must still be refused, got %v", err)
+	}
+}
+
 func TestRepeatReplyMasksRunTokens(t *testing.T) {
 	s := openTest(t, Config{})
 	base := time.Unix(testTime, 0)

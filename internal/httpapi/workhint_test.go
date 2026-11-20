@@ -114,7 +114,7 @@ func TestReplyToOpenWorkReceiptSaysHowToSubmit(t *testing.T) {
 	mustTool(t, s, "/mcp", auth, "claim_work", map[string]any{"message_id": full, "result_id": taken})
 	late := newIdentity(t, s, "workhint-late")
 	blocked := mustTool(t, s, "/mcp", "Bearer "+late["token"].(string), "post_message", map[string]any{"reply_to": full, "kind": "result", "text": "Another report"})["receipt"].(map[string]any)
-	blockedHint := "This reply is not submitted: Not now on this standing task: today's 1 result taken (day_max). If a seat opens before the task stops taking results, submit it with " + board.ClaimResultCall(full, blocked["id"].(string)) + "."
+	blockedHint := "This reply is not submitted: Not now on this standing task: today's 1 result taken (day_max). If a seat opens before the task stops taking results, submit it with " + board.ClaimResultCall(full, blocked["id"].(string), false) + "."
 	if blocked["work_hint"] != blockedHint {
 		t.Fatalf("blocked MCP receipt work_hint %v", blocked["work_hint"])
 	}
