@@ -157,7 +157,9 @@ func (s *Store) replayErasures(ctx context.Context) (int, error) {
 // replayErasure erases one account again, as of now, and restores its
 // erasure_log row as first written. It writes no audit row the log would
 // take as a second leaf; the replay is in the row's own audit trail as
-// account.erase.replay.
+// account.erase.replay; only when the copy's log lacks the erasure's leaf
+// (its identity leaves still have their bodies) does it log account.erase
+// again (C1126).
 func (s *Store) replayErasure(ctx context.Context, e erasureSideEntry) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -171,6 +173,20 @@ func (s *Store) replayErasure(ctx context.Context, e erasureSideEntry) error {
 	}
 	if _, err = s.EraseAccount(ctx, tx, e.Account, now, keep); err != nil {
 		return err
+	}
+	// C1126: a copy older than the erasure lacks its account.erase leaf, so
+	// the account's identity leaves still serve their bodies. Then the
+	// replay logs the erasure (the receipt's hash, as recordErasure does)
+	// and withholds them.
+	if _, pending, err := withholdErased(ctx, tx, e.Account, now); err != nil {
+		return err
+	} else if pending > 0 {
+		if err = audit(ctx, tx, "account.erase", "operator", e.Account, "erased again after a restore; "+erasureReceiptDetail+e.ReceiptSHA256, now); err != nil {
+			return err
+		}
+		if err = withholdAfterErasure(ctx, tx, e.Account, now); err != nil {
+			return err
+		}
 	}
 	ids, err := eraseIDs(ctx, tx, e.Account)
 	if err != nil {

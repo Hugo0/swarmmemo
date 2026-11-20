@@ -234,6 +234,70 @@ def _path(m: int, leaves: list[bytes]) -> list[bytes]:
     return _path(m - k, leaves[k:]) + [_tree(leaves[:k])]
 
 
+class Withheld(unittest.TestCase):
+    """C1126: a withheld leaf (its account erased) verifies by its served
+    leaf hash, and only with a later account.erase leaf proven beside it."""
+
+    def setUp(self):
+        import json
+
+        enc = lambda d: json.dumps(d, separators=(",", ":")).encode()
+        self.leaves = [enc({"v": 1, "kind": "identity", "at": 100, "op": "handle.claim", "agent": "aa" * 32, "detail": "secret-handle"}),
+                       enc({"v": 1, "kind": "message", "at": 101, "id": "ab" * 16}),
+                       enc({"v": 1, "kind": "identity", "at": 102, "op": "account.erase", "agent": "aa" * 32, "hash": "cd" * 32})]
+        self.v = v.Verifier("http://127.0.0.1:9", None, None)
+
+    def entry(self, i: int, size: int) -> dict:
+        b64 = lambda b: base64.b64encode(b).decode()
+        return {"leaf": {"index": i, "kind": "identity", "data": self.leaves[i].decode(), "leaf_hash": b64(v.leaf_hash(self.leaves[i]))},
+                "proof": [b64(x) for x in _path(i, self.leaves[:size])]}
+
+    def withheld(self, i: int, erase: int, size: int = 3) -> dict:
+        p = self.entry(i, size)
+        p["leaf"].update(data=None, withheld="erased", erased_by=erase)
+        p["erasure"] = self.entry(erase, size)
+        return p
+
+    def check(self, p: dict, size: int = 3):
+        return self.v.inclusion(p, size, _tree(self.leaves[:size]))
+
+    def test_withheld_verifies(self):
+        got = self.check(self.withheld(0, 2))
+        self.assertEqual((got["withheld"], got["erased_by"], got["erased_agent"]), ("erased", 2, "aa" * 32))
+        self.assertNotIn("secret-handle", str(got))
+
+    def test_withheld_without_a_later_erase_is_refused(self):
+        bad = []
+        p = self.withheld(0, 2)
+        del p["erasure"]
+        bad.append(p)  # no erase leaf
+        bad.append(self.withheld(0, 1))  # the later leaf is a message, not account.erase
+        p = self.withheld(0, 2)
+        p["leaf"]["erased_by"] = 1
+        bad.append(p)  # erased_by names another leaf
+        p = self.withheld(0, 2)
+        p["leaf"]["withheld"] = None
+        bad.append(p)  # no reason
+        p = self.withheld(0, 2)
+        p["leaf"]["leaf_hash"] = base64.b64encode(v.leaf_hash(b"other")).decode()
+        bad.append(p)  # not the logged hash
+        p = self.withheld(1, 2)
+        p["leaf"]["leaf_hash"] = self.entry(0, 3)["leaf"]["leaf_hash"]
+        bad.append(p)  # leaf 0's hash at index 1
+        bad.append(self.withheld(2, 0))  # the erase leaf is before the withheld one
+        p = self.withheld(1, 2)
+        p["leaf"]["kind"] = "message"
+        bad.append(p)  # a message leaf withheld (its proof is right)
+        for p in bad:
+            with self.assertRaises(v.VerifyError):
+                self.check(p)
+        # Leaf 2 is not in a 2-leaf checkpoint: the erasure is not provable yet.
+        p = self.withheld(0, 2, size=2)
+        p["erasure"] = {"leaf": {"index": 2, "kind": "identity", "data": self.leaves[2].decode()}, "proof": []}
+        with self.assertRaises(v.VerifyError):
+            self.check(p, size=2)
+
+
 class Promises(unittest.TestCase):
     """verify_log promise against a log built here: one key signs the
     checkpoint and the promise, as the board's log key does."""

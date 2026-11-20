@@ -63,6 +63,10 @@ import (
 	"swarmmemo/internal/trust"
 )
 
+// tlogSchema is the transparency log. Leaves, hashes and checkpoints are
+// append-only; since schema 55 (C1126) the one update allowed is an
+// identity leaf's data to empty when tlog_withheld names the later
+// account.erase leaf of its account (tlogwithhold.go).
 const tlogSchema = `
 CREATE TABLE IF NOT EXISTS tlog_leaves (
  idx INTEGER PRIMARY KEY, kind TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', ref TEXT NOT NULL DEFAULT '',
@@ -78,7 +82,19 @@ CREATE TABLE IF NOT EXISTS tlog_anchors (
  size INTEGER PRIMARY KEY REFERENCES tlog_checkpoints(size), digest TEXT NOT NULL, ots BLOB NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('pending','confirmed','stale')), bitcoin_height INTEGER NOT NULL DEFAULT 0,
  calendars TEXT NOT NULL, submitted_at INTEGER NOT NULL, checked_at INTEGER NOT NULL DEFAULT 0);
-CREATE TRIGGER IF NOT EXISTS tlog_leaves_no_update BEFORE UPDATE ON tlog_leaves BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
+CREATE TABLE IF NOT EXISTS tlog_withheld (
+ idx INTEGER PRIMARY KEY REFERENCES tlog_leaves(idx), erase_idx INTEGER NOT NULL, account TEXT NOT NULL, op TEXT NOT NULL,
+ created_at INTEGER NOT NULL, CHECK(erase_idx>idx));
+CREATE TRIGGER IF NOT EXISTS tlog_withheld_needs_erase BEFORE INSERT ON tlog_withheld
+ WHEN NOT EXISTS(SELECT 1 FROM tlog_leaves e WHERE e.idx=NEW.erase_idx AND e.kind='identity' AND e.subject=NEW.account AND e.data LIKE '%"op":"account.erase"%')
+ OR NOT EXISTS(SELECT 1 FROM tlog_leaves l WHERE l.idx=NEW.idx AND l.kind='identity')
+ BEGIN SELECT RAISE(ABORT,'a leaf body is withheld only before an account.erase leaf'); END;
+CREATE TRIGGER IF NOT EXISTS tlog_withheld_no_update BEFORE UPDATE ON tlog_withheld BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS tlog_withheld_no_delete BEFORE DELETE ON tlog_withheld BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS tlog_leaves_no_update BEFORE UPDATE ON tlog_leaves
+ WHEN NOT (NEW.data='' AND OLD.kind='identity' AND NEW.idx IS OLD.idx AND NEW.kind IS OLD.kind AND NEW.subject IS OLD.subject
+ AND NEW.ref IS OLD.ref AND NEW.created_at IS OLD.created_at AND EXISTS(SELECT 1 FROM tlog_withheld w WHERE w.idx=OLD.idx))
+ BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS tlog_leaves_no_delete BEFORE DELETE ON tlog_leaves BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS tlog_hashes_no_update BEFORE UPDATE ON tlog_hashes BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS tlog_hashes_no_delete BEFORE DELETE ON tlog_hashes BEGIN SELECT RAISE(ABORT,'transparency log is append-only'); END;
@@ -400,6 +416,18 @@ func tlogCatchUp(ctx context.Context, tx *sql.Tx) (int, error) {
 			if err != nil {
 				return 0, err
 			}
+			if !public && p.leaf.Op == "account.erase" {
+				// An erasure of an account never public is logged too when
+				// the log has an identity leaf with a body its erasure
+				// withholds (a witness leaf): the erase leaf is what lets
+				// that body be withheld (C1126). Only that leaf: the
+				// account's earlier identity rows stay out of the log.
+				list, err := withholdCandidates(ctx, tx, p.ref)
+				if err != nil {
+					return 0, err
+				}
+				public, p.account = len(list) > 0, ""
+			}
 			if !public {
 				continue
 			}
@@ -463,9 +491,11 @@ func appendLeaf(ctx context.Context, tx *sql.Tx, size *int64, read tlog.HashRead
 
 // onRecordSQL is true when the account ? has a message leaf or an identity
 // leaf of its own (a witness leaf is the witness key's, logged because the
-// witnessed agent is public, so it does not count).
+// witnessed agent is public, so it does not count). A withheld leaf has no
+// data to match: its operation is in tlog_withheld (C1126).
 const onRecordSQL = `EXISTS(SELECT 1 FROM identities k JOIN tlog_leaves l ON l.subject=k.id WHERE k.account=? AND l.subject<>''
- AND (l.kind='message' OR l.kind='identity' AND l.data NOT LIKE '%"op":"identity.witness"%'))`
+ AND (l.kind='message' OR l.kind='identity' AND (l.data<>'' AND l.data NOT LIKE '%"op":"identity.witness"%'
+ OR l.data='' AND EXISTS(SELECT 1 FROM tlog_withheld w WHERE w.idx=l.idx AND w.op<>'identity.witness'))))`
 
 // accountFirstOnRecord reports whether a keyed account has no leaf of its
 // own yet, so the leaf about to be appended puts it on the record.
@@ -516,8 +546,12 @@ func appendIdentityRows(ctx context.Context, tx *sql.Tx, list []identityRow, siz
 	n := 0
 	for _, r := range list {
 		l := r.leaf()
+		data := l.bytes()
+		hash := tlog.LeafHash(data)
 		var logged bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tlog_leaves WHERE subject=? AND kind='identity' AND data=?)", r.actor, string(l.bytes())).Scan(&logged); err != nil {
+		// A withheld leaf (C1126) is found by its stored leaf hash.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tlog_leaves t WHERE t.subject=? AND t.kind='identity'
+ AND (t.data=? OR t.data='' AND EXISTS(SELECT 1 FROM tlog_hashes h WHERE h.level=0 AND h.idx=t.idx AND h.hash=?)))`, r.actor, string(data), hash[:]).Scan(&logged); err != nil {
 			return n, err
 		}
 		if logged {
@@ -774,12 +808,16 @@ func (s *Store) ReadLogCheckpoint(ctx context.Context, size int64) (LogCheckpoin
 	return s.checkpointFrom(size, created, root, note), nil
 }
 
-// LogEntry is one leaf.
+// LogEntry is one leaf. A withheld leaf (tlogwithhold.go) has no Data
+// (served as null), the stored leaf hash, Withheld "erased" and ErasedBy,
+// the index of the later account.erase leaf.
 type LogEntry struct {
-	Index int64  `json:"index"`
-	Kind  string `json:"kind"`
-	Data  string `json:"data"`
-	Hash  string `json:"leaf_hash"`
+	Index    int64  `json:"index"`
+	Kind     string `json:"kind"`
+	Data     string `json:"data"`
+	Hash     string `json:"leaf_hash"`
+	Withheld string `json:"withheld,omitempty"`
+	ErasedBy int64  `json:"erased_by,omitempty"`
 }
 
 func newLogEntry(index int64, kind, data string) LogEntry {
@@ -796,6 +834,10 @@ type LogInclusion struct {
 	// Related are the other leaves about the same message (hides, restores),
 	// each with its own proof.
 	Related []LogInclusion `json:"related,omitempty"`
+	// Erasure is, for a withheld leaf, the later account.erase leaf that
+	// lets its body be withheld, with its proof against the same checkpoint
+	// (no proof until a checkpoint covers it).
+	Erasure *LogInclusion `json:"erasure,omitempty"`
 	// A message leaf's proof carries what the leaf only hashes, while the
 	// message is public and not hidden: its text (SHA-256 is the leaf's
 	// text_sha256) and, when signed, signed_payload, the exact canonical
@@ -1113,7 +1155,28 @@ func (s *Store) inclusion(ctx context.Context, index int64, cp LogCheckpoint, wi
 	if err := s.db.QueryRowContext(ctx, "SELECT kind,data FROM tlog_leaves WHERE idx=?", index).Scan(&kind, &data); err != nil {
 		return LogInclusion{}, err
 	}
-	out := LogInclusion{Leaf: newLogEntry(index, kind, data), TreeSize: cp.Size, Checkpoint: cp}
+	leaf, err := servedLeaf(ctx, s.db, index, kind, data)
+	if err != nil {
+		return LogInclusion{}, err
+	}
+	out := LogInclusion{Leaf: leaf, TreeSize: cp.Size, Checkpoint: cp}
+	if leaf.Withheld != "" {
+		// The account.erase leaf that lets the body be withheld, proven
+		// against the same checkpoint once it covers it (Leaf only before).
+		erasure := LogInclusion{TreeSize: cp.Size, Checkpoint: cp}
+		if leaf.ErasedBy < cp.Size {
+			if erasure, err = s.inclusion(ctx, leaf.ErasedBy, cp, withPath); err != nil {
+				return LogInclusion{}, err
+			}
+		} else {
+			var ekind, edata string
+			if err = s.db.QueryRowContext(ctx, "SELECT kind,data FROM tlog_leaves WHERE idx=?", leaf.ErasedBy).Scan(&ekind, &edata); err != nil {
+				return LogInclusion{}, err
+			}
+			erasure.Leaf = newLogEntry(leaf.ErasedBy, ekind, edata)
+		}
+		out.Erasure = &erasure
+	}
 	if !withPath {
 		return out, nil
 	}
@@ -1179,9 +1242,28 @@ func (s *Store) ReadLogLeaves(ctx context.Context, start, end int64) ([]LogEntry
 		if err = rows.Scan(&i, &kind, &data); err != nil {
 			return nil, size, err
 		}
-		out = append(out, newLogEntry(i, kind, data))
+		e := LogEntry{}
+		if data != "" {
+			e = newLogEntry(i, kind, data)
+		} else {
+			e.Index, e.Kind = i, kind // a withheld leaf: read after the rows (one connection)
+		}
+		out = append(out, e)
 	}
-	return out, size, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, size, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, size, err
+	}
+	for i, e := range out {
+		if e.Hash == "" {
+			if out[i], err = servedLeaf(ctx, s.db, e.Index, e.Kind, ""); err != nil {
+				return nil, size, err
+			}
+		}
+	}
+	return out, size, nil
 }
 
 // LogAnchor is one checkpoint's OpenTimestamps proof and its timeline:
@@ -1887,7 +1969,8 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 		}
 		events = append(events, idx)
 		var l logLeaf
-		if json.Unmarshal([]byte(data), &l) == nil && (l.Op == "agent.register" || l.Op == "handle.claim") && l.Detail != "" {
+		// A withheld leaf (data '', C1126) names no handle: its proof says withheld.
+		if data != "" && json.Unmarshal([]byte(data), &l) == nil && (l.Op == "agent.register" || l.Op == "handle.claim") && l.Detail != "" {
 			r.Handles = append(r.Handles, RecordHandle{Handle: l.Detail, At: at, Key: l.Agent})
 		}
 	}
@@ -1913,6 +1996,9 @@ func (s *Store) ReadLogRecord(ctx context.Context, who string) (SignedRecord, er
 			return SignedRecord{}, err
 		}
 		p.Checkpoint = LogCheckpoint{} // the record's own checkpoint
+		if p.Erasure != nil {
+			p.Erasure.Checkpoint = LogCheckpoint{}
+		}
 		r.Proofs = append(r.Proofs, p)
 	}
 	if s.config.Features.Trust != TrustOff {

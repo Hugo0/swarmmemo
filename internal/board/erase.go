@@ -51,7 +51,7 @@ type EraseCount struct {
 
 // ErasureKept names what an erasure keeps, and why, for the receipt.
 var ErasureKept = []string{
-	"transparency log leaves and hashes (they never held text)",
+	"transparency log leaves' hashes and proofs (the bodies of its identity leaves are withheld)",
 	"credit ledger, holds, payouts and their transaction hashes (accounting, public by policy)",
 	"moderation decisions, reports and sanctions (an erasure does not end a sanction)",
 	"votes and vouches as weights (other accounts' standing rests on them)",
@@ -290,8 +290,24 @@ func (s *Store) EraseAccount(ctx context.Context, tx *sql.Tx, account string, no
 		return nil, err
 	}
 	counts = append(counts, ws)
+	// C1126: the bodies of its identity leaves. The log first takes every
+	// row it has not yet (so the count is exact); the leaves before an
+	// earlier erasure's leaf are withheld now (a second run, a replay), the
+	// rest once this erasure's leaf is appended: recordErasure (or a replay)
+	// fails unless all of them are, so the count is what the erasure withholds.
+	if err = tlogCatchUpAll(ctx, tx); err != nil {
+		return nil, err
+	}
+	withheld, pending, err := withholdErased(ctx, tx, account, now)
+	if err != nil {
+		return nil, err
+	}
+	counts = append(counts, EraseCount{"tlog_leaves", eraseLeavesAction, withheld + pending})
 	return counts, nil
 }
+
+// eraseLeavesAction is the receipt's line for withheld log leaf bodies.
+const eraseLeavesAction = "identity leaves' bodies withheld (leaf hashes and proofs kept)"
 
 // erasedHashPrefix starts a standing_assessments value or root an erasure
 // replaced by its keyed hash.
@@ -481,6 +497,11 @@ func (s *Store) recordErasure(ctx context.Context, tx *sql.Tx, run *erasureRun, 
 		return err
 	}
 	if err := audit(ctx, tx, "account.erase", by, r.Account, "erased "+how+"; "+erasureReceiptDetail+r.ReceiptHash, r.ErasedAt); err != nil {
+		return err
+	}
+	// The account.erase leaf, then the identity leaves before it lose their
+	// bodies (C1126): the leaf comes first, as the protocol rule asks.
+	if err := withholdAfterErasure(ctx, tx, r.Account, r.ErasedAt); err != nil {
 		return err
 	}
 	signed, err := s.signErasure(*r)

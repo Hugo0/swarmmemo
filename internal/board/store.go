@@ -458,7 +458,14 @@ CREATE TABLE IF NOT EXISTS leases (
 // request reference and the receipt hash, never content. Additive: a
 // schema-53 binary never reads it, but refuses a schema-54 database, so a
 // rollback past 54 needs the pre-deploy snapshot (RUNBOOK "Owner erasure").
-const SchemaVersion = 54
+//
+// 55: tlog_withheld and a narrowed tlog_leaves_no_update (transparency.go,
+// C1126): an erasure may set an identity leaf's data to empty once a later
+// account.erase leaf names the account; hashes never change. A schema-54
+// binary refuses the database (and would serve a withheld leaf with the hash
+// of empty data), so a rollback past 55 needs the pre-deploy snapshot
+// (RUNBOOK "Owner erasure").
+const SchemaVersion = 55
 
 // connPragmas are the per-connection PRAGMAs, in modernc.org/sqlite's DSN
 // syntax. journal_mode=WAL is stored in the database file and set at Open.

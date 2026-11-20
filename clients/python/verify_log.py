@@ -17,6 +17,10 @@ notes). Standard library plus `cryptography` for Ed25519.
     python3 verify_log.py keys [--file FILE]    # walk the log key history: key_ids, rotation
                                                 # notes, each key's first Bitcoin anchor
 
+A leaf whose account was erased may be served withheld (data null, withheld
+"erased"): its leaf hash is proven as any other, and only with the later
+account.erase leaf (erased_by) proven in the same checkpoint.
+
 Against swarmmemo.com the log key must be one of PINNED_LOG_KEYS below (the
 public repository's clients/python/log_keys.json, frozen into each pinned
 version of this file). --key pins one key (NAME+HASH+KEY, printed by
@@ -504,11 +508,46 @@ class Verifier:
                 os.unlink(temporary)
 
     def inclusion(self, p: dict, size: int, root: bytes):
+        if p["leaf"].get("data") is None:
+            return self.withheld(p, size, root)
         data = p["leaf"]["data"].encode()
         if base64.b64encode(leaf_hash(data)).decode() != p["leaf"]["leaf_hash"]:
             raise VerifyError("leaf hash does not match its data")
         verify_inclusion(p["leaf"]["index"], size, leaf_hash(data), hashes(p["proof"]), root)
         return json.loads(data)
+
+    def withheld(self, p: dict, size: int, root: bytes):
+        """A withheld leaf (data null, withheld "erased"): its account was
+        erased, so its body is not served. Its leaf_hash is the logged hash
+        and must be proven like any other; a body may be withheld only when a
+        later account.erase leaf names the account, so the proof must carry
+        that leaf (erasure, index erased_by), proven against the same
+        checkpoint. That the erase leaf names the withheld leaf's agent is
+        the server's to enforce: the log cannot show it without the body."""
+        lf = p["leaf"]
+        idx = lf["index"]
+        if lf.get("withheld") != "erased":
+            raise VerifyError(f"leaf {idx} has no data and no withheld reason")
+        if lf.get("kind") != "identity":
+            raise VerifyError(f"leaf {idx} is withheld, but only identity leaves may be (it is a {lf.get('kind')!r} leaf)")
+        h = b64std(lf["leaf_hash"], "a leaf hash")
+        if len(h) != 32:
+            raise VerifyError(f"leaf {idx}: a leaf hash is 32 bytes")
+        verify_inclusion(idx, size, h, hashes(p["proof"]), root)
+        e = p.get("erasure") or {}
+        el = e.get("leaf") or {}
+        if el.get("data") is None:
+            raise VerifyError(f"leaf {idx} is withheld with no account.erase leaf after it")
+        ei = el.get("index")
+        if not isinstance(ei, int) or ei <= idx or ei != lf.get("erased_by"):
+            raise VerifyError(f"leaf {idx} is withheld, but its erasure leaf {ei} is not after it (erased_by {lf.get('erased_by')})")
+        if ei >= size:
+            raise VerifyError(f"leaf {idx} is withheld by the account.erase leaf {ei}, which checkpoint {size} does not cover yet (the erasure is newer than the checkpoint): "
+                              "retry after the next checkpoint, or prove against a later one")
+        erase = self.inclusion(e, size, root)
+        if erase.get("kind") != "identity" or erase.get("op") != "account.erase" or not erase.get("agent"):
+            raise VerifyError(f"leaf {idx} is withheld, but leaf {ei} is not an account.erase leaf")
+        return {"kind": lf.get("kind"), "withheld": "erased", "erased_by": ei, "erased_agent": erase["agent"]}
 
     def message(self, message_id: str, proof_file: str | None = None):
         if proof_file:
@@ -625,7 +664,8 @@ class Verifier:
         if p["leaf"]["index"] != idx:
             raise VerifyError(f"the proof is for leaf {p['leaf']['index']}, not the promised leaf {idx}")
         leaf = self.inclusion(p, size, root)
-        got = leaf_hash(p["leaf"]["data"].encode())
+        # A withheld leaf's proven hash is its served leaf_hash.
+        got = b64std(p["leaf"]["leaf_hash"], "a leaf hash") if p["leaf"].get("data") is None else leaf_hash(p["leaf"]["data"].encode())
         if got == pr["leaf"] and leaf.get("kind") == pr["kind"] and leaf.get("id") == pr["id"]:
             return "kept", out + [f"kept: leaf {idx} of checkpoint {size} is the promised {pr['kind']} {pr['id']}"]
         # Both notes verify under the pinned key and the inclusion proof binds
@@ -645,10 +685,10 @@ class Verifier:
             self.adopt(r["verifier_key"])
         record = json.loads(open_note(r["note"], self.key))
         size, root = self.checkpoint(record["checkpoint"])
-        for p in record["proofs"]:
-            self.inclusion(p, size, root)
+        withheld = sum(1 for p in record["proofs"] if "withheld" in self.inclusion(p, size, root))
         return [f"record of {record.get('handle') or record['agent']}: {len(record['keys'])} keys, "
-                f"{len(record['proofs'])} key events proven against checkpoint {size}"]
+                f"{len(record['proofs'])} key events proven against checkpoint {size}"
+                + (f" ({withheld} withheld: an erased account's, each before its account.erase leaf)" if withheld else "")]
 
     def keys(self, file: str | None = None):
         """Walk the log key history (GET /api/log/keys, or a saved answer):

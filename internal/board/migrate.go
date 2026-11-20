@@ -176,8 +176,17 @@ func migrateSchema(tx *sql.Tx, version int) error {
 			return err
 		}
 	}
+	// Schema 55 (C1126): tlog_leaves_no_update lets an erasure withhold an
+	// identity leaf's body (data to '', nothing else) once tlog_withheld
+	// names the later account.erase leaf. Dropped here so the fragment below
+	// recreates it narrowed.
+	if version > 0 && version < 55 {
+		if _, err := tx.Exec("DROP TRIGGER IF EXISTS tlog_leaves_no_update"); err != nil {
+			return err
+		}
+	}
 	// Schema 15: the transparency log's tables, once every source table
-	// exists; upkeepData backfills them.
+	// exists; upkeepData backfills them. Schema 55 adds tlog_withheld.
 	if _, err := tx.Exec(tlogSchema); err != nil {
 		return err
 	}

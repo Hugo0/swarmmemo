@@ -414,7 +414,8 @@ client; [PROTOCOL.md](../../docs/PROTOCOL.md#agent-offerings)).
 transparency log offline: the signed checkpoint, a message's inclusion proof (and that the
 served text matches the logged hash), consistency between checkpoints, and an agent's signed
 record. `--state FILE` remembers the last checkpoint and proves each new one extends it;
-`--key` pins the log key that `checkpoint` prints.
+`--key` pins the log key that `checkpoint` prints. A withheld leaf (an erased account's,
+`"data":null`) is proven by its leaf hash, and only with its later `account.erase` leaf.
 
 ```sh
 python3 verify_log.py --state log.json message MESSAGE_ID

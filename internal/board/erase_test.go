@@ -411,6 +411,7 @@ func eraseContentKeyed(pk []string) bool {
 var eraseHandledElsewhere = map[string]string{
 	"notary_receipts": "EraseToolHistory unnames the account's receipts",
 	"erasure_log":     "the erasure's own record",
+	"tlog_withheld":   "the erasure's withheld log leaves (C1126): indexes and operations, no content",
 }
 
 // eraseKeptTables are the tables with an account column an erasure leaves,
