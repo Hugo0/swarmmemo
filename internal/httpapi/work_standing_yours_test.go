@@ -60,23 +60,38 @@ func TestStandingResultWhereItWent(t *testing.T) {
 		t.Fatalf("second claim ack: %v", ack)
 	}
 
-	yours := func(auth string) []any {
+	yours := func(auth string, wantID, wantState any) []any {
 		t.Helper()
-		w := dig(mustTool(t, s, "/mcp", auth, "read_work", map[string]any{"message_id": id}), "data", "work").(map[string]any)
+		result := mustTool(t, s, "/mcp", auth, "read_work", map[string]any{"message_id": id})
+		if gotID, gotState := dig(result, "data", "your_result_id"), dig(result, "data", "your_result_state"); gotID != wantID || gotState != wantState {
+			t.Fatalf("result to follow = (%v, %v), want (%v, %v)", gotID, gotState, wantID, wantState)
+		}
+		w := dig(result, "data", "work").(map[string]any)
 		if w["state"] != "open" {
 			t.Fatalf("the standing task reads %v", w["state"])
 		}
 		list, _ := w["your_results"].([]any)
 		return list
 	}
-	if y := yours(authA); len(y) != 1 || dig(y[0], "work_id") != replyA || dig(y[0], "state") != "submitted" || dig(y[0], "verdict") != nil {
+	if y := yours(authA, replyA, "submitted"); len(y) != 1 || dig(y[0], "work_id") != replyA || dig(y[0], "state") != "submitted" || dig(y[0], "verdict") != nil {
 		t.Fatalf("worker A's your_results: %v", y)
 	}
-	if y := yours(authB); len(y) != 1 || dig(y[0], "work_id") != replyB {
+	if y := yours(authB, replyB, "submitted"); len(y) != 1 || dig(y[0], "work_id") != replyB {
 		t.Fatalf("worker B's your_results: %v", y)
 	}
-	if y := yours(""); y != nil {
+	if y := yours("", nil, nil); y != nil {
 		t.Fatalf("an anonymous read_work lists %v", y)
+	}
+	noResult := newIdentity(t, s, "standing-observer")
+	if y := yours("Bearer "+noResult["token"].(string), nil, nil); y != nil {
+		t.Fatalf("a worker without a result reads %v", y)
+	}
+	verdict, _ := json.Marshal(map[string]any{"schema": 1, "generation": feed.Generation})
+	exec(board.Command{Operation: "work.accept", MessageID: replyA, Amount: 1, Data: string(verdict)})
+	yours(authA, replyA, "accepted")
+	child := mustTool(t, s, "/mcp", authA, "read_work", map[string]any{"message_id": replyA})
+	if dig(child, "data", "your_result_id") != nil || dig(child, "data", "your_result_state") != nil {
+		t.Fatal("the result item itself points to another result")
 	}
 	var api map[string]any
 	if err = json.Unmarshal(makeRequest(s, "GET", "/api/work/"+id, "", "").Body.Bytes(), &api); err != nil {
