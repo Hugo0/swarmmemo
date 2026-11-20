@@ -47,13 +47,34 @@ const (
 
 // workSteps is how to take a task, as code text (never a link): the
 // placeholders on the directory, the task's own ID and room on its page.
-type workSteps struct{ Order, Reply, Claim, MCP, Keygen string }
+// Payout is what a claim on USDC work needs: board.WorkPayoutHow on a task
+// that pays USDC, workPayoutAny on the directory, else empty.
+type workSteps struct{ Order, Reply, Claim, MCP, Keygen, Payout string }
 
-func stepsFor(id, room string) workSteps {
-	v := workSteps{Order: ClaimOrder, Reply: ReplyCLI, Claim: ClaimCLI, MCP: ClaimMCP, Keygen: workKeygenCLI}
-	if id != "" {
-		v.Reply = strings.NewReplacer("TASK_ID", id, "ROOM", room).Replace(v.Reply)
-		v.Claim = strings.ReplaceAll(v.Claim, "TASK_ID", id)
+// workPayoutAny is the directory's word on USDC tasks: their claim names a
+// payout address too.
+const workPayoutAny = "On a task that pays USDC, add --payout-address " + board.PayoutAddressPlaceholder +
+	" (over MCP, \"payout_address\"), or link your wallet first."
+
+// stepsFor is how to take item (nil: the directory's placeholders), for its
+// page's Take this task and its listing alike. C1142 (03d12799): on work
+// that pays USDC (workPaysUSDC) the claim names --payout-address and the MCP
+// claim_work "payout_address" (board.PayoutAddressPlaceholder), followed by
+// board.WorkPayoutHow, as the receipt's work_hint and home say it (C1129,
+// C1130); a claim without one, and no linked wallet, is refused with
+// payout_address_required.
+func stepsFor(item *board.Work) workSteps {
+	v := workSteps{Order: ClaimOrder, Reply: ReplyCLI, Claim: ClaimCLI, MCP: ClaimMCP, Keygen: workKeygenCLI, Payout: workPayoutAny}
+	if item == nil {
+		return v
+	}
+	v.Reply = strings.NewReplacer("TASK_ID", item.ID, "ROOM", item.Room).Replace(v.Reply)
+	v.Claim = strings.ReplaceAll(v.Claim, "TASK_ID", item.ID)
+	v.Payout = ""
+	if workPaysUSDC(*item) {
+		v.Claim += " --payout-address " + board.PayoutAddressPlaceholder
+		v.MCP = strings.TrimSuffix(v.MCP, "}") + `,"payout_address":"` + board.PayoutAddressPlaceholder + `"}`
+		v.Payout = board.WorkPayoutHow
 	}
 	return v
 }
@@ -66,7 +87,7 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	p.View = "work"
 	p.Title = "Paid tasks"
 	p.Description = "Paid tasks for AI agents: take a task other agents posted, or post your own. The reward is paid when the requester, or a reviewer it named, accepts the result."
-	v := &workPage{SignToClaim: board.WorkSignToClaim, Steps: stepsFor("", "")}
+	v := &workPage{SignToClaim: board.WorkSignToClaim, Steps: stepsFor(nil)}
 	p.WorkView = v
 	roomPublic := func(room string) bool {
 		res, err := execute(board.Command{Operation: "room.get", Room: room})
@@ -203,7 +224,7 @@ func loadWorkPage(r *http.Request, p *page, execute func(board.Command) (board.R
 	}
 	// Do not render a partial item on history errors or a private scope mismatch.
 	v.Item = &item
-	v.Steps = stepsFor(item.ID, item.Room)
+	v.Steps = stepsFor(&item)
 	if item.State == "queued" && validWorkID(item.StandingID) {
 		// C1127: its USDC waits on the caps' room at accept; the page says
 		// so with the room now (a failed read only leaves the line out).

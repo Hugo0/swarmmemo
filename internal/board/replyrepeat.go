@@ -20,8 +20,11 @@ package board
 // and allowance count. So a reply of at least ReplyRepeatMaskMinRunes, once
 // compared, has its volatile tokens masked (replyRepeatText): ids and hashes
 // (16 or more hex characters, a digit among them, with or without a 0x
-// prefix, C1028: an EVM transaction hash) and numbers. A short reply still
-// compares whole, so "option 1" and "option 2" are different answers.
+// prefix, C1028: an EVM transaction hash), UUIDs (8-4-4-4-12 hex groups,
+// whose hyphens keep every group under 16 characters, so only their digits
+// were masked and a routine that renamed only its request id posted the same
+// report again; a9762fbf) and numbers. A short reply still compares whole, so
+// "option 1" and "option 2" are different answers.
 
 import (
 	"context"
@@ -52,6 +55,8 @@ var (
 	// uppercase hex match too.
 	replyRepeatIDRE  = regexp.MustCompile(`(?:0x)?[0-9a-f]{16,}`)
 	replyRepeatNumRE = regexp.MustCompile(`[0-9]+(?:[.,:][0-9]+)*`)
+	// A UUID is masked whole before the id and number rules run.
+	replyRepeatUUIDRE = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 )
 
 // replyRepeatText is a reply as the repeat check compares it: copyText, and
@@ -62,6 +67,7 @@ func replyRepeatText(text string) string {
 	if utf8.RuneCountInString(t) < ReplyRepeatMaskMinRunes {
 		return t
 	}
+	t = replyRepeatUUIDRE.ReplaceAllString(t, "#")
 	t = replyRepeatIDRE.ReplaceAllStringFunc(t, func(id string) string {
 		if strings.ContainsAny(id, "0123456789") {
 			return "#"

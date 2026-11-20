@@ -149,9 +149,12 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	if err = r.db.QueryRow("SELECT count(*) FROM notary_receipts WHERE payload LIKE '%résumé%'").Scan(&stored); err != nil || stored != 0 {
 		t.Fatalf("text must not be stored: %d %v", stored, err)
 	}
-	var public1 string
-	if err = r.db.QueryRow("SELECT public FROM service_calls WHERE service='notary' LIMIT 1").Scan(&public1); err != nil || public1 != "{}" {
-		t.Fatalf("the public call record shows nothing: %q %v", public1, err)
+	// The public call record shows nothing but the receipt's seq (C1132:
+	// tool history reads a receipt's cost from the call that made it).
+	var publics string
+	if err = r.db.QueryRow("SELECT group_concat(public,' ') FROM (SELECT public FROM service_calls WHERE service='notary' ORDER BY created_at, public)").Scan(&publics); err != nil ||
+		publics != `{"seq":1} {"seq":1,"duplicate":true} {"seq":2}` {
+		t.Fatalf("the public call records: %q %v", publics, err)
 	}
 	// The key survives a restart.
 	r.e = r.open()

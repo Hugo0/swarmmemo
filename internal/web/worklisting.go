@@ -136,15 +136,14 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 		l.Markdown += line + next + "\n"
 		return l
 	}
-	steps := stepsFor(item.ID, item.Room)
+	// The task page's own steps (C1142): a USDC reward is paid to the
+	// claim's payout address or the worker's linked wallet; with neither the
+	// claim is 400 payout_address_required (C988), so both say so.
+	steps := stepsFor(&item)
 	l.Reply, l.Claim = steps.Reply, steps.Claim
-	// A USDC reward is paid to the claim's payout address or the worker's
-	// linked wallet; with neither the claim is 400 payout_address_required
-	// (C988), so the listing says so.
 	payout := ""
-	if workListingPaysUSDC(item) {
-		l.Claim += " --payout-address " + board.PayoutAddressPlaceholder
-		payout = board.WorkPayoutHow + "\n"
+	if steps.Payout != "" {
+		payout = steps.Payout + "\n"
 	}
 	if st != nil && st.Open == 0 && st.BlockedNote != "" {
 		l.Markdown += "No seat is open on this round now (" + st.BlockedNote + ")." + next + "\n\n"
@@ -154,9 +153,9 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 	return l
 }
 
-// workListingPaysUSDC says whether item pays USDC: a USDC reward, or a
-// standing tier with one.
-func workListingPaysUSDC(item board.Work) bool {
+// workPaysUSDC says whether item pays USDC: a USDC reward, or a standing
+// tier with one (board's workPaysUSDC, from the work a page reads).
+func workPaysUSDC(item board.Work) bool {
 	if item.RewardUSDC != nil {
 		return true
 	}

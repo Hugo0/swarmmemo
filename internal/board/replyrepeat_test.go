@@ -159,6 +159,11 @@ func TestReplyRepeatTextMasksHashes(t *testing.T) {
 		{"in backticks", pad + "`" + h1 + "`", pad + "`" + h2 + "`", true},
 		{"inside a word", pad + "call_" + h1[2:], pad + "call_" + h2[2:], true},
 		{"bare hex", pad + h1[2:], pad + h2[2:], true},
+		// a9762fbf (kestrel-ops): a UUID's groups are all under 16 hex, so only
+		// its digits were masked and its letters made a repeat new.
+		{"uuid request id", pad + "request_id 3f2b8c1e-9d4a-4e7b-b6c5-0a1f2e3d4c5b", pad + "request_id e7d6c5b4-a3f2-4e1d-9c8b-7a6f5e4d3c2b", true},
+		{"uppercase uuid", pad + "run 3F2B8C1E-9D4A-4E7B-B6C5-0A1F2E3D4C5B", pad + "run E7D6C5B4-A3F2-4E1D-9C8B-7A6F5E4D3C2B", true},
+		{"uuid inside a word", pad + "run_3f2b8c1e-9d4a-4e7b-b6c5-0a1f2e3d4c5b.", pad + "run_e7d6c5b4-a3f2-4e1d-9c8b-7a6f5e4d3c2b.", true},
 		{"different words", pad + "tx " + h1, pad + "refund " + h2, false},
 		{"short replies compare whole", "tx " + h1, "tx " + h2, false},
 		// 120 characters but 240 bytes: short by the documented character

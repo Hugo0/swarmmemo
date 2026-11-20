@@ -112,3 +112,69 @@ func TestWorkPageLeadsWithTheTask(t *testing.T) {
 		t.Error("a task that cannot be claimed offers the take block")
 	}
 }
+
+// C1142 (03d12799): a task's Take this task names --payout-address and the
+// MCP "payout_address" exactly when the work pays USDC (a USDC reward, or a
+// standing tier in USDC), with board.WorkPayoutHow, as its listing does from
+// the same steps; credit work keeps the plain claim. The directory keeps its
+// placeholders and says what a USDC task takes.
+func TestTakeSectionNamesPayoutAddressOnlyWhereUSDCIsPaid(t *testing.T) {
+	base := func() board.Work {
+		return board.Work{ID: webWorkID, Room: "bounties", Title: "Translate a doc", State: "open", StoredState: "open", Claimable: true,
+			Generation: strings.Repeat("b", 32), ServiceGeneration: strings.Repeat("c", 32), ServiceID: "swarmmemo.com",
+			RequesterAuthor: strings.Repeat("1", 64), Requester: board.AgentRef{ID: strings.Repeat("2", 64), Handle: "asker"},
+			Reward: &board.WorkReward{Amount: 40, Unit: "credit", State: "held"}, Capabilities: []string{}, Deadline: 1789171200,
+			Request: &board.WorkRequest{Text: "Translate this into French.", VersionID: webWorkID, Versions: 1}}
+	}
+	take := func(item board.Work) string {
+		t.Helper()
+		s := &testService{execute: func(c board.Command) (board.Result, error) {
+			switch c.Operation {
+			case "room.get":
+				return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+			case "work.get":
+				return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+			case "work.history":
+				return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+			}
+			return board.Result{OK: true}, nil
+		}}
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+		body := w.Body.String()
+		i := strings.Index(body, `<h2 id="take-heading">Take this task</h2>`)
+		if w.Code != 200 || i < 0 {
+			t.Fatalf("/work/ID: %d, take section %d", w.Code, i)
+		}
+		section, _, _ := strings.Cut(body[i:], "</section>")
+		return html.UnescapeString(section)
+	}
+	claim := "python3 swarmmemo.py --key key.json work claim " + webWorkID + " --result RESULT_ID"
+	usdcClaim := claim + " --payout-address " + board.PayoutAddressPlaceholder
+	usdcMCP := `claim_work {"message_id":"TASK_ID","result_id":"RESULT_ID","payout_address":"` + board.PayoutAddressPlaceholder + `"}`
+
+	credit := take(base())
+	if !strings.Contains(credit, claim+"</code>") || !strings.Contains(credit, "Over MCP: "+ClaimMCP+".") ||
+		strings.Contains(credit, "payout") || strings.Contains(credit, "It pays USDC") {
+		t.Errorf("a credit task's take section:\n%s", credit)
+	}
+
+	reward := base()
+	reward.Reward, reward.RewardUSDC = nil, &board.WorkRewardUSDC{Amount: "0.10"}
+	tier := base()
+	tier.Standing = &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Open: 2, Seats: 3}, Tiers: []board.WorkStandingTier{{Name: "minor", Credits: 100}, {Name: "bug", Credits: 300, USDC: "0.05"}}}
+	for name, item := range map[string]board.Work{"USDC reward": reward, "USDC tier": tier} {
+		got := take(item)
+		if !strings.Contains(got, usdcClaim+"</code>") || !strings.Contains(got, usdcMCP) || !strings.Contains(got, board.WorkPayoutHow) {
+			t.Errorf("%s: the take section misses the payout address:\n%s", name, got)
+		}
+		// One source: the listing's claim is the take section's.
+		if l := WorkListingFor(item, ""); l.Claim != usdcClaim || !strings.Contains(got, l.Claim) {
+			t.Errorf("%s: listing claim %q, take section:\n%s", name, l.Claim, got)
+		}
+	}
+
+	if d := stepsFor(nil); d.Claim != ClaimCLI || d.MCP != ClaimMCP || d.Payout != workPayoutAny {
+		t.Errorf("the directory's steps: %+v", d)
+	}
+}

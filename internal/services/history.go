@@ -14,10 +14,12 @@ import (
 
 // Tool history (C1003): an agent's own past free tool calls, read back from
 // the rows the call record already keeps (service_calls) and, for the
-// notary, from its receipts (notary_receipts). Nothing new is stored: each
-// entry is derived at read time, and it carries a call's target, hash and
-// size, never the page text, the values or the screened text. service.read
-// method status with the call id still reads a stored result in full.
+// notary, from its receipts (notary_receipts), its cost from the call that
+// made each one (notaryCost). Nothing new is stored but a stamp call's
+// receipt seq: each entry is derived at read time, and it carries a call's
+// target, hash and size, never the page text, the values or the screened
+// text. service.read method status with the call id still reads a stored
+// result in full.
 
 const (
 	// HistoryPageDefault and HistoryPageMax bound one service.calls page.
@@ -218,9 +220,10 @@ func (e *Engine) History(ctx context.Context, q allowance.Querier, h HistoryQuer
 		}
 	}
 	if withNotary {
-		r, err := q.QueryContext(ctx, `SELECT seq,hash,time,coalesce((SELECT c.cost FROM service_calls c WHERE c.account=n.account AND c.service=? AND c.method='stamp' AND c.created_at=n.time LIMIT 1),0)
+		costSQL, args := notaryCost(notaryID)
+		r, err := q.QueryContext(ctx, `SELECT seq,hash,time,`+costSQL+`
  FROM notary_receipts n WHERE account=? AND time>=? AND (time<? OR time=? AND ('notary:'||seq)<?)
- ORDER BY time DESC, ('notary:'||seq) DESC LIMIT ?`, notaryID, h.Account, h.Since, beforeAt, beforeAt, beforeID, h.Limit+1)
+ ORDER BY time DESC, ('notary:'||seq) DESC LIMIT ?`, append(args, h.Account, h.Since, beforeAt, beforeAt, beforeID, h.Limit+1)...)
 		if err != nil {
 			return nil, "", err
 		}
@@ -270,8 +273,9 @@ func (e *Engine) HistoryByID(ctx context.Context, q allowance.Querier, id string
 		}
 		var hash, account string
 		var at, cost int64
-		err := q.QueryRowContext(ctx, `SELECT hash,time,account,coalesce((SELECT c.cost FROM service_calls c WHERE c.account=n.account AND c.service=? AND c.method='stamp' AND c.created_at=n.time LIMIT 1),0)
- FROM notary_receipts n WHERE seq=?`, e.notaryID(), seq).Scan(&hash, &at, &account, &cost)
+		costSQL, args := notaryCost(e.notaryID())
+		err := q.QueryRowContext(ctx, `SELECT hash,time,account,`+costSQL+`
+ FROM notary_receipts n WHERE seq=?`, append(args, seq)...).Scan(&hash, &at, &account, &cost)
 		if errors.Is(err, sql.ErrNoRows) {
 			return HistoryRow{}, false, nil
 		}
@@ -333,6 +337,26 @@ func historyCostNote(cost int64, resource string) string {
 		return "Free: no cost."
 	}
 	return costUnits(cost, resource) + ", counted against the free daily allowance first; the agent's balance pays only past the daily limit."
+}
+
+// notaryCost is the SQL for the cost of receipt n's entry, with its args, for
+// every reader of a receipt's entry (C1132): what the call that made that very
+// receipt used, joined on the receipt's seq, never on its second alone, so no
+// other call (another agent's, a repeat, an unrelated stamp in that second)
+// changes it. That is the notary.stamp call whose record names the seq (a
+// repeat's says duplicate), else the doc or paste whose notary: true made it
+// (the DocNotaryPrice surcharge), else a stamp in that second from before
+// stamps named their seq (every newer one does, so none can take its place),
+// else 0: a receipt the board made for its own records. The second only
+// narrows the lookup to an index (service_calls and a doc outside a group,
+// by account and time); the seq decides.
+func notaryCost(service string) (string, []any) {
+	const stamp = `SELECT c.cost FROM service_calls c WHERE c.account=n.account AND c.service=? AND c.method='stamp' AND c.created_at=n.time AND `
+	const doc = `SELECT ? FROM docs d WHERE d.account=n.account AND d.created_at=n.time AND d.notary_seq=n.seq AND `
+	return `coalesce((` + stamp + `json_extract(c.public,'$.seq')=n.seq AND json_extract(c.public,'$.duplicate') IS NULL LIMIT 1),
+ (` + doc + `d.room='' LIMIT 1), (` + doc + `d.room<>'' LIMIT 1),
+ (` + stamp + `json_extract(c.public,'$.seq') IS NULL ORDER BY c.id LIMIT 1),0)`,
+		[]any{service, DocNotaryPrice, DocNotaryPrice, service}
 }
 
 // notaryEntry is a notary receipt's entry; notary.stamp is priced in credit.

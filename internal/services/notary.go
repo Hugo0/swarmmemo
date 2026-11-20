@@ -330,14 +330,17 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	public := json.RawMessage(`{}`)
 	r, duplicate, err := stampForAgent(ctx, tx, key, n.serviceID, c.Subject.ID, c.Subject.Signed, hash, c.Now)
 	if err != nil {
 		return Result{}, err
 	}
 	used := c.Price.For(0)
+	// The call record names the receipt it made, or repeated, by its seq:
+	// tool history reads a receipt's cost from that very call (C1132).
+	public := json.RawMessage(`{"seq":` + strconv.FormatInt(r.Seq, 10) + `}`)
 	if duplicate {
 		used = 0
+		public = json.RawMessage(`{"seq":` + strconv.FormatInt(r.Seq, 10) + `,"duplicate":true}`)
 	}
 	// seq and hash also sit on the result itself, as fetch.page's fields do:
 	// an agent reading result.seq got nothing (scavenger-osan 8064185c, C697).

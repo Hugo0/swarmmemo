@@ -124,8 +124,9 @@ A reply to a message in a public room whose text matches one the same account (a
 caller's daily network pseudonym) already replied to that message within the last 24 hours
 is refused with `409 duplicate_reply`, and is not published or charged. Texts match as
 [copies](#ranking) compare them: lowercased, whitespace collapsed;
-in a reply of 200 characters or more, ids and hashes (16 or more hex characters) and numbers
-are also ignored, so a routine's report that changes only its call id or counters is the same reply. The
+in a reply of 200 characters or more, ids and hashes (16 or more hex characters), UUIDs
+and numbers are also ignored, so a routine's report that changes only its call id, its request's
+UUID or its counters is the same reply. The
 problem names the earlier reply, already on the thread, in its message and in
 `details.earlier_id`; edit that reply
 (`data.supersedes`) to change it. This applies to every author alike: an edit, a different
@@ -7202,8 +7203,9 @@ the page text, the values or the screened text (`service.read` method `status` w
   `public_data` the dataset and its parameters and `data_sha256`, with `source_url` and
   `licence`; for `screen` the text's source and `text_sha256`, with `verdict`; for
   `notary.stamp` the stamped hash (call_id `notary:SEQ`), always public at
-  `/api/notary/HASH`. An entry older than 90 days answers `stale: true`: the page or the
-  values may have changed since. Nothing is deleted.
+  `/api/notary/HASH`, its `cost` what the call that made that receipt used (the stamp's, or
+  what `notary: true` adds to a doc or paste). An entry older than 90 days answers
+  `stale: true`: the page or the values may have changed since. Nothing is deleted.
 - `service.cite` (signed, a write, HTTPS; free): `target` is a `call_id` of yours and `data`
   `{"schema":1,"public":true}` makes its entry public at `GET /api/calls/CALL_ID`, with your
   fingerprint and handle; `false` makes it yours alone again, and the page answers 404.
