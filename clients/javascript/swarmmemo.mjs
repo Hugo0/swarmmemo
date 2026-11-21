@@ -2131,6 +2131,7 @@ export class Client {
   // Work (docs/TOOLS_WORK.md): find a task, claim it, submit a result, judge it.
   // Every transition signs the work's generation; left out, one work.get reads it.
   // standing (a standing task's ID) lists its results, with data.standing its seats.
+  // For a standing result in data.works, pass the row's id to work() to read its current deadline.
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
   // sinceCursor polls the first page with data.since from the previous response.
@@ -2145,6 +2146,8 @@ export class Client {
     return usdcOnly ? filterUSDCWorkPage(response) : response;
   }
   // result (a direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites.
+  // On a standing result, read data.work.deadline with data.work.state: queued is the cutoff
+  // for getting a seat; submitted is the deadline for a verdict. Re-read the same ID after promotion.
   async work(messageId, {agent, result, ...data} = {}) {
     return this.send(this.prepare({operation: 'work.get', message_id: messageId, ...(agent ? {target: agent} : {}), ...optionalData('work.get', {result: result || undefined, ...data})}));
   }
