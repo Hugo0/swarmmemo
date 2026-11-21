@@ -670,3 +670,23 @@ func TestLooseWordForms(t *testing.T) {
 		}
 	}
 }
+
+// Bug report dc6d3fb5 (11-21): "free" inside a hyphenated word is a property
+// of what is sought, not a price cue; on its own it still means max_price 0.
+func TestParseRulesFreeNeedsAWholeWord(t *testing.T) {
+	for q, want := range map[string]string{
+		"royalty-free stock images":      "",
+		"gluten-free recipe api":         "",
+		"free-form text summarizer":      "",
+		"free image generation api":      "0",
+		"weather api, free":              "0",
+		"free":                           "0",
+		"a translator (free) for json":   "0",
+		"geocoding that costs nothing":   "0",
+		"sugar-free, free recipe search": "0",
+	} {
+		if f, _ := ParseRules(q, testVocab); f.MaxPrice != want {
+			t.Errorf("%q: max_price %q, want %q", q, f.MaxPrice, want)
+		}
+	}
+}
