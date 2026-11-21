@@ -695,4 +695,11 @@ func TestDatasetUnavailableIsNotRetryable(t *testing.T) {
 			t.Errorf("%s: %+v", code, be)
 		}
 	}
+	// The upstream's own wait survives (a bundler 429's Retry-After, C1187);
+	// none, or a shorter one, is 5 seconds.
+	for in, want := range map[int]int{30: 30, 0: 5, 2: 5} {
+		if !errors.As(serviceErrorWords(&allowance.Err{Code: "upstream_busy", RetryAfter: in}), &be) || be.Status != 503 || be.RetryAfter != want {
+			t.Errorf("upstream_busy retry_after %d: %+v, want %d", in, be, want)
+		}
+	}
 }

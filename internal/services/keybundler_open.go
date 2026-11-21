@@ -10,7 +10,9 @@ package services
 // they run after the command's transaction has committed (RemoteReader),
 // under the engine's per-caller read limit, a cache (searches 10 minutes,
 // descriptors an hour, probes 5 minutes) and a global bound on upstream
-// requests a minute. Upstream text (titles, descriptions, schemas) is
+// requests a minute, a bound per network on unsigned readers' upstream
+// requests, and a pause for the bundler's Retry-After after a 429 (C1187).
+// Upstream text (titles, descriptions, schemas) is
 // untrusted: control characters are stripped, every field is capped, a
 // description SwarmMemo's text screen flagged is withheld, and each answer
 // says text_is_untrusted. Every hit is recorded in frames_tools with the bundler's
@@ -99,6 +101,14 @@ const (
 	// bundlerUpstreamPerMinute bounds the requests SwarmMemo sends the bundler's
 	// free endpoints a minute, for every caller together (cache misses).
 	bundlerUpstreamPerMinute = 120
+	// bundlerAnonUpstreamPerMinute bounds the requests one network's unsigned
+	// tools_search and tools_get reads send the bundler a minute (cache
+	// misses; a cold tools_get costs two), answered 429 request_rate.
+	bundlerAnonUpstreamPerMinute = 10
+	// A bundler 429 stops every upstream request for its Retry-After
+	// (default bundlerBackoffDefault, at most bundlerBackoffMax).
+	bundlerBackoffDefault = 30 * time.Second
+	bundlerBackoffMax     = 10 * time.Minute
 	// Timeouts of the bundler's free endpoints: a search runs its angles in
 	// parallel (seconds each), a probe asks the seller.
 	bundlerSearchTimeout    = 15 * time.Second
@@ -246,19 +256,29 @@ type bundlerState struct {
 	probes      ttlCache[bundlerProbe]
 	minute      int64 // the upstream window's minute and its requests
 	requests    int
+	// backoffUntil is when the bundler's last 429 lifts: until then no
+	// request is sent.
+	backoffUntil time.Time
+	anonMisses   rateTable // unsigned readers' upstream requests, per network
+	// now is the upstream bounds' clock: time.Now, moved by tests.
+	now func() time.Time
 
 	screening atomic.Bool
 	screened  atomic.Int64 // when descriptions were last screened (the store's clock)
 }
 
 func newBundlerState(cfg *X402Config, b *keyBundler) *bundlerState {
-	return &bundlerState{b: b, cfg: b.open, deny: cfg.denyIndex(nil)}
+	return &bundlerState{b: b, cfg: b.open, deny: cfg.denyIndex(nil), now: time.Now}
 }
 
-// allowUpstream counts one request to the bundler against the global minute.
+// allowUpstream counts one request to the bundler against the global minute,
+// and refuses every one, sending nothing, while the bundler's last 429 holds.
 func (f *bundlerState) allowUpstream(now time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if wait := f.backoffUntil.Sub(now); wait > 0 {
+		return &allowance.Err{Code: "upstream_busy", RetryAfter: ceilSeconds(wait)}
+	}
 	minute := now.Unix() / 60
 	if f.minute != minute {
 		f.minute, f.requests = minute, 0
@@ -270,11 +290,58 @@ func (f *bundlerState) allowUpstream(now time.Time) error {
 	return nil
 }
 
+// backOff records the bundler's 429: nothing is sent for its Retry-After
+// (seconds or an HTTP date; default bundlerBackoffDefault, at most
+// bundlerBackoffMax). It returns the seconds left to wait.
+func (f *bundlerState) backOff(retryAfter string, now time.Time) int {
+	wait := bundlerBackoffDefault
+	if n, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && n > 0 {
+		wait = time.Duration(min(n, int(bundlerBackoffMax/time.Second))) * time.Second
+	} else if at, err := http.ParseTime(retryAfter); err == nil && at.After(now) {
+		wait = min(at.Sub(now), bundlerBackoffMax)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if until := now.Add(wait); until.After(f.backoffUntil) {
+		f.backoffUntil = until
+	}
+	return ceilSeconds(f.backoffUntil.Sub(now))
+}
+
+// ceilSeconds is d in whole seconds, rounded up.
+func ceilSeconds(d time.Duration) int { return int((d + time.Second - 1) / time.Second) }
+
+// bundlerCaller is the context key of an unsigned reader's network.
+type bundlerCaller struct{}
+
+// bundlerCallerOf marks ctx with an unsigned reader's network, whose
+// upstream requests allowAnonUpstream bounds; a signed reader is unmarked.
+func bundlerCallerOf(ctx context.Context, s allowance.Subject) context.Context {
+	if s.Signed || s.ID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, bundlerCaller{}, s.ID)
+}
+
+// allowAnonUpstream counts one unsigned reader's upstream request against
+// its network's minute (bundlerAnonUpstreamPerMinute).
+func (f *bundlerState) allowAnonUpstream(ctx context.Context, now time.Time) error {
+	network, _ := ctx.Value(bundlerCaller{}).(string)
+	if network == "" {
+		return nil
+	}
+	return f.anonMisses.admit(network, bundlerAnonUpstreamPerMinute, now.Unix())
+}
+
 // bundlerAPI sends one request to the bundler's API through the SSRF-safe client,
 // with our key, reading at most limit bytes of a 2xx answer. The key is
 // never part of an error.
 func (x *x402) bundlerAPI(ctx context.Context, method, path string, body any, limit int, timeout time.Duration) ([]byte, error) {
-	if err := x.fr.allowUpstream(time.Now()); err != nil {
+	now := x.fr.now()
+	if err := x.fr.allowUpstream(now); err != nil {
+		return nil, err
+	}
+	if err := x.fr.allowAnonUpstream(ctx, now); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -309,7 +376,7 @@ func (x *x402) bundlerAPI(ctx context.Context, method, path string, body any, li
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, refusal("x402_unknown_resource")
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return nil, &allowance.Err{Code: "upstream_busy", RetryAfter: 30}
+		return nil, &allowance.Err{Code: "upstream_busy", RetryAfter: x.fr.backOff(resp.Header.Get("Retry-After"), x.fr.now())}
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return nil, refusal("upstream_failed")
 	}
@@ -700,14 +767,16 @@ func (x *x402) ReadRemote(ctx context.Context, q allowance.Querier, c Call) (fun
 			return nil, err
 		}
 		return func(ctx context.Context) (json.RawMessage, error) {
-			return x.bundlerToolRead(ctx, tool, row, known, price)
+			return x.bundlerToolRead(bundlerCallerOf(ctx, c.Subject), tool, row, known, price)
 		}, nil
 	}
 	s, err := x.parseBundlerSearch(c.Args)
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context) (json.RawMessage, error) { return x.bundlerSearchRead(ctx, s, price, c.Now) }, nil
+	return func(ctx context.Context) (json.RawMessage, error) {
+		return x.bundlerSearchRead(bundlerCallerOf(ctx, c.Subject), s, price, c.Now)
+	}, nil
 }
 
 func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Price, now int64) (json.RawMessage, error) {

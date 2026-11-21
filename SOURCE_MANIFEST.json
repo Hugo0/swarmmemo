@@ -1024,8 +1024,8 @@
     {
       "mode": "0644",
       "path": "docs/PROTOCOL.md",
-      "sha256": "85f081f1f215b777ea6548e76b751e6857e3a5f78a40fbf9cc7b87ca7cd3a8f3",
-      "size": 712217
+      "sha256": "c096ec729181181073f4a304cf7345b2ec8c7adad2384e3495339f86deb85230",
+      "size": 712258
     },
     {
       "mode": "0644",
@@ -1108,8 +1108,8 @@
     {
       "mode": "0644",
       "path": "docs/TOOLS_PAID_APIS.md",
-      "sha256": "3ab144ec0be65ec794c4f926ff88ad570b98bcdd25692ada654569f1fa85f0ed",
-      "size": 3618
+      "sha256": "67230ec0d373417617e7ab7facf3248e90b869da0f83d472491f2ec6cf97ca2b",
+      "size": 3822
     },
     {
       "mode": "0644",
@@ -3766,14 +3766,14 @@
     {
       "mode": "0644",
       "path": "internal/board/serviceswire.go",
-      "sha256": "9d2f6657ea762a87d14911c2e72095257704300044b1cda4c52af3efe84fcb10",
-      "size": 36813
+      "sha256": "ebbd479fe2e7d2e3a5399d2b2b290e737c5b45c203cb36980169d57ff5a4feff",
+      "size": 36947
     },
     {
       "mode": "0644",
       "path": "internal/board/serviceswire_test.go",
-      "sha256": "0de438af5b9a19b8e14c989a8d59eb8c9b83cd7a883933821bb151143b8a4c39",
-      "size": 32536
+      "sha256": "4a36b0e06a598085b7a143e72b0e34dae48ab3d7b38143898cc65447abaf9e18",
+      "size": 32931
     },
     {
       "mode": "0644",
@@ -8824,14 +8824,14 @@
     {
       "mode": "0644",
       "path": "internal/services/keybundler_open.go",
-      "sha256": "f2273d9beccce3b362d70cb16ce50683cad121d7b8eade601d41f8a208285c5b",
-      "size": 54658
+      "sha256": "7dbbe1b762eb1e3b7b12487887d0e7c45cb31e450ea711f5a774481056c32e2a",
+      "size": 57669
     },
     {
       "mode": "0644",
       "path": "internal/services/keybundler_open_test.go",
-      "sha256": "72e3d6667e5f8f6102d51879e5e55e47654b795dc619047cb1bebf7f6ee20f6f",
-      "size": 61780
+      "sha256": "c0b93b68aa12fee7360c9661b6b449409568fb31024ebe9f184805b59dbae658",
+      "size": 67040
     },
     {
       "mode": "0644",
@@ -9634,8 +9634,8 @@
     {
       "mode": "0644",
       "path": "internal/services/x402.go",
-      "sha256": "ac1f8c4e01a75c6d2138777f41b50f1dc65bd27758d6dae32529a825728816a4",
-      "size": 75267
+      "sha256": "015017de3c97f0a5e8ebf011e838d84ffea532329cd3b7f997f328d03bbb7103",
+      "size": 75489
     },
     {
       "mode": "0644",

@@ -332,6 +332,7 @@ func (x *x402) Describe() Descriptor {
 			{"x402_max_bytes", X402ResponseBytesCeiling, "bytes", "Response body returned with max_bytes"},
 			{"x402_resources_page", X402PageMax, "", "Resources in one resources read"},
 			{"tools_search_hits", bundlerHitsMax, "", "Hits in one tools_search read"},
+			{"tools_unsigned_upstream_per_minute", bundlerAnonUpstreamPerMinute, "", "Upstream lookups (answers not cached) one network's unsigned tools_search and tools_get reads may make a minute; signed reads are not counted"},
 		},
 		Mode: Remote,
 		Methods: []Method{

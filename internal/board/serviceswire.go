@@ -752,7 +752,9 @@ func serviceErrorWords(err error) error {
 	case "upstream_failed":
 		return problem(503, "service_unavailable", "The service call failed and nothing was charged; retry with a new request ID.")
 	case "upstream_busy":
-		return &Error{Status: 503, Code: "service_unavailable", Message: "The service is busy and nothing was charged; retry with a new request ID in a few seconds.", RetryAfter: 5}
+		// The upstream's own wait when it named one (a bundler 429's
+		// Retry-After, C1187), else 5 seconds.
+		return &Error{Status: 503, Code: "service_unavailable", Message: "The service is busy and nothing was charged; retry with a new request ID after retry_after seconds.", RetryAfter: max(e.RetryAfter, 5)}
 	case "upstream_unavailable":
 		return &Error{Status: 503, Code: "service_unavailable", Message: "No upstream for this service can be called right now (none configured, suspended, or its daily budget is spent), and nothing was charged. Pick another tool from " + services.ListWhere + " or the /tools page, or call this one again after 00:00 UTC, when budgets reset.", RetryAfter: 60}
 	case services.RefusalDatasetUnavailable:

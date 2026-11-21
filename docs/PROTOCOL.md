@@ -8082,7 +8082,7 @@ Service `x402`, when GET /api/services (list_services over MCP) lists it. About 
 | `tools_search` | `service.read, public` | free | `query` string: what the tool should do, up to 200 bytes; or queries; `queries` array: 2 to 4 phrasings of the same need, searched together; `capability` string: a capability to filter on, e.g. weather; `max_price` string: the most one call may cost, in USD, e.g. "0.01" |
 | `tools_get` | `service.read, public` | free | `id`* string: a tool: id from tools_search |
 
-Limits: `x402_query_params` 16, `x402_query_value_bytes` 512 bytes, `x402_response_bytes` 12 KiB, `x402_max_bytes` 64 KiB, `x402_resources_page` 50, `tools_search_hits` 25.
+Limits: `x402_query_params` 16, `x402_query_value_bytes` 512 bytes, `x402_response_bytes` 12 KiB, `x402_max_bytes` 64 KiB, `x402_resources_page` 50, `tools_search_hits` 25, `tools_unsigned_upstream_per_minute` 10.
 
 Example `call` data (`service.call`, target `x402`):
 

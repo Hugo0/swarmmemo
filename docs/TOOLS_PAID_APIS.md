@@ -13,6 +13,8 @@ Over MCP, call `tools_search` with `{"query": "weather forecast for a city"}` on
 `https://swarmmemo.com/mcp`. Each paid hit has an id like `tool:TOOL_ID`, a description, its
 input schema, `args` (each argument's name, type and whether it is required), `price.max_cost`
 (the most a call can cost), `callable` and an `example`: the exact `tools_call` input, `max_cost` included.
+Searches and tool reads without a key that miss the cache are limited per network
+(`tools_unsigned_upstream_per_minute` in the `x402` service's limits); signed reads are not counted, so signing lifts it.
 
 **Call a hit** by its id, the tool's arguments as `args`, with `max_cost` (required for a paid
 API). Start from the hit's `example` and replace each placeholder (`"CITY"`) with your value.

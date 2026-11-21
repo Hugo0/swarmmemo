@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -35,6 +36,8 @@ type fakeBundlerAPI struct {
 	badAuth                        int
 	lastSearch                     map[string]any
 	searchStatus                   int
+	busyGets                       int    // descriptor reads still answered 429
+	retryAfter                     string // the Retry-After header of a 429
 }
 
 func (f *fakeBundlerAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +56,9 @@ func (f *fakeBundlerAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.lastSearch = nil
 		_ = json.Unmarshal(raw, &f.lastSearch)
 		if f.searchStatus != 0 {
+			if f.retryAfter != "" {
+				w.Header().Set("Retry-After", f.retryAfter)
+			}
 			w.WriteHeader(f.searchStatus)
 			return
 		}
@@ -108,6 +114,14 @@ func (f *fakeBundlerAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"results":[{"id":%q,"delivered":true,"response":{"temp_c":14},"receipt":{"tool":%q,"delivered":true%s}}],"billing":{"charged_credits":%s,"balance_credits":2997}}`, tool, tool, f.receiptExtra, f.charged)
 	default:
 		f.nGet++
+		if f.busyGets > 0 {
+			f.busyGets--
+			if f.retryAfter != "" {
+				w.Header().Set("Retry-After", f.retryAfter)
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		id := strings.TrimPrefix(r.URL.Path, "/v1/tools/")
 		d, ok := f.tools[id]
 		if !ok {
@@ -910,16 +924,19 @@ func TestBundlerUpstreamFailures(t *testing.T) {
 		t.Fatalf("search 500: %v", err)
 	}
 	api.searchStatus = http.StatusTooManyRequests
-	if _, err := h.bundlerRead(testSubject, "tools_search", `{"query":"weather"}`); errCode(err) != "upstream_busy" {
+	if _, err := h.bundlerRead(testSubject, "tools_search", `{"query":"weather"}`); errCode(err) != "upstream_busy" || retryAfterOf(err) != 30 {
 		t.Fatalf("search 429: %v", err)
 	}
+	// A 429 without Retry-After pauses the bundler 30 s (C1187): move past it.
+	fr := bundlerOf(t, h).fr
+	fr.now = func() time.Time { return time.Now().Add(31 * time.Second) }
 	// The global bound on upstream requests a minute.
 	h.engine.cfg.ReadsPerMinute = 1 << 20
 	api.searchStatus = 0
 	// The bound is per calendar minute, so a slow run that crosses a minute
 	// boundary starts a fresh count: try again in the next minute.
 	for attempt := range 3 {
-		start := time.Now().Unix() / 60
+		start := fr.now().Unix() / 60
 		for i := range bundlerUpstreamPerMinute + 1 {
 			_, err := h.bundlerRead(testSubject, "tools_search", fmt.Sprintf(`{"query":"a%dq%d"}`, attempt, i))
 			if err != nil {
@@ -929,11 +946,117 @@ func TestBundlerUpstreamFailures(t *testing.T) {
 				return
 			}
 		}
-		if time.Now().Unix()/60 == start {
+		if fr.now().Unix()/60 == start {
 			break
 		}
 	}
 	t.Fatal("no bound on upstream requests")
+}
+
+// retryAfterOf is a refusal's retry_after; -1 when err is no allowance.Err.
+func retryAfterOf(err error) int {
+	var e *allowance.Err
+	if !errors.As(err, &e) {
+		return -1
+	}
+	return e.RetryAfter
+}
+
+// TestBundlerBacksOffAfter429: the bundler's 429 and its Retry-After stop
+// every upstream request until it lifts; each read in between is refused
+// upstream_busy with the seconds left and sends nothing (C1187: one anonymous
+// poller of cold tools_get kept hitting a 429ing bundler, 194 × 503).
+func TestBundlerBacksOffAfter429(t *testing.T) {
+	h, api := newBundlerHarness(t, "", "")
+	if _, err := h.bundlerRead(testSubject, "tools_search", `{"query":"weather"}`); err != nil {
+		t.Fatal(err)
+	}
+	fr := bundlerOf(t, h).fr
+	clock := time.Unix(1_700_000_000, 0)
+	fr.now = func() time.Time { return clock }
+	_, _, gets, _ := api.count()
+	api.mu.Lock()
+	api.busyGets, api.retryAfter = 1, "30"
+	api.mu.Unlock()
+	if _, err := h.bundlerRead(testSubject, "tools_get", `{"id":"tool:`+toolOK+`"}`); errCode(err) != "upstream_busy" || retryAfterOf(err) != 30 {
+		t.Fatalf("first 429: %v (retry_after %d)", err, retryAfterOf(err))
+	}
+	tools := []string{toolOK, toolUnvet, toolPricey, toolDead, toolDenied}
+	for i := range 6 {
+		args := `{"id":"tool:` + tools[i%len(tools)] + `"}`
+		if _, err := h.bundlerRead(testSubject, "tools_get", args); errCode(err) != "upstream_busy" || retryAfterOf(err) != 30 {
+			t.Fatalf("read %d in the pause: %v (retry_after %d)", i, err, retryAfterOf(err))
+		}
+		if _, err := h.bundlerRead(testSubject, "tools_search", fmt.Sprintf(`{"query":"q%d"}`, i)); errCode(err) != "upstream_busy" || retryAfterOf(err) != 30 {
+			t.Fatalf("search %d in the pause: %v", i, err)
+		}
+	}
+	clock = clock.Add(20 * time.Second)
+	if _, err := h.bundlerRead(testSubject, "tools_get", `{"id":"tool:`+toolOK+`"}`); errCode(err) != "upstream_busy" || retryAfterOf(err) != 10 {
+		t.Fatalf("20 s in: %v (retry_after %d)", err, retryAfterOf(err))
+	}
+	if s, _, g, _ := api.count(); g != gets+1 || s != 1 {
+		t.Fatalf("the pause sent requests: %d gets after the 429, %d searches", g-gets-1, s-1)
+	}
+	clock = clock.Add(10 * time.Second)
+	if _, err := h.bundlerRead(testSubject, "tools_get", `{"id":"tool:`+toolOK+`"}`); err != nil {
+		t.Fatalf("after the pause: %v", err)
+	}
+	if _, _, g, _ := api.count(); g != gets+2 {
+		t.Fatalf("after the pause the read did not reach the bundler: %d gets", g-gets)
+	}
+	// Retry-After as an HTTP date, and one past the cap.
+	for _, c := range []struct {
+		header string
+		want   int
+	}{{clock.Add(45 * time.Second).UTC().Format(http.TimeFormat), 45}, {"86400", 600}, {"soon", 30}} {
+		bundlerOf(t, h).forget()
+		api.mu.Lock()
+		api.busyGets, api.retryAfter = 1, c.header
+		api.mu.Unlock()
+		if _, err := h.bundlerRead(testSubject, "tools_get", `{"id":"tool:`+toolOK+`"}`); retryAfterOf(err) != c.want {
+			t.Fatalf("Retry-After %q: %v (retry_after %d), want %d", c.header, err, retryAfterOf(err), c.want)
+		}
+		clock = clock.Add(time.Duration(c.want) * time.Second)
+	}
+}
+
+// TestBundlerAnonUpstreamPerNetwork: one network's unsigned reads send the
+// bundler at most bundlerAnonUpstreamPerMinute requests a minute (cache
+// misses; cached answers are free), refused 429 request_rate; another
+// network and a signed reader are not counted against it (C1187).
+func TestBundlerAnonUpstreamPerNetwork(t *testing.T) {
+	h, api := newBundlerHarness(t, "", "")
+	fr := bundlerOf(t, h).fr
+	clock := time.Unix(1_700_000_000, 0)
+	fr.now = func() time.Time { return clock }
+	anon := allowance.Subject{ID: "anon:net-9"}
+	for i := range bundlerAnonUpstreamPerMinute {
+		if _, err := h.bundlerRead(anon, "tools_search", fmt.Sprintf(`{"query":"w%d"}`, i)); err != nil {
+			t.Fatalf("search %d: %v", i, err)
+		}
+	}
+	before, _, _, _ := api.count()
+	_, err := h.bundlerRead(anon, "tools_search", `{"query":"one more"}`)
+	if errCode(err) != "request_rate" || retryAfterOf(err) <= 0 || retryAfterOf(err) > 60 {
+		t.Fatalf("past the network's bound: %v", err)
+	}
+	if s, _, _, _ := api.count(); s != before {
+		t.Fatal("a refused read reached the bundler")
+	}
+	if _, err := h.bundlerRead(anon, "tools_search", `{"query":"w0"}`); err != nil {
+		t.Fatalf("a cached answer is free: %v", err)
+	}
+	if _, err := h.bundlerRead(allowance.Subject{ID: "anon:net-10"}, "tools_search", `{"query":"other"}`); err != nil {
+		t.Fatalf("another network: %v", err)
+	}
+	if _, err := h.bundlerRead(testSubject, "tools_search", `{"query":"signed"}`); err != nil {
+		t.Fatalf("signed: %v", err)
+	}
+	clock = clock.Add(time.Minute)
+	if _, err := h.bundlerRead(anon, "tools_search", `{"query":"one more"}`); err != nil {
+		t.Fatalf("next minute: %v", err)
+	}
 }
 
 func TestBundlerAnonymous(t *testing.T) {
