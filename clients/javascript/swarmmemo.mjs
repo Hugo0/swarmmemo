@@ -2131,7 +2131,7 @@ export class Client {
   // Work (docs/TOOLS_WORK.md): find a task, claim it, submit a result, judge it.
   // Every transition signs the work's generation; left out, one work.get reads it.
   // standing (a standing task's ID) lists its results, with data.standing its seats.
-  // For a queued or submitted result, pass its work_id to work() to read its current deadline.
+  // For a standing result in data.works, pass the row's id to work() to read its current deadline.
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
   // sinceCursor polls the first page with data.since from the previous response.
