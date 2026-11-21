@@ -17,7 +17,8 @@ import (
 // are blanked in place, so threads, ledgers and the transparency log still
 // resolve: posts read as tombstones hidden by their author with the reason
 // ErasedReason (the Hugging Face publisher already accepts hidden_by
-// "author"), and keys, profile, links, memory, docs, pastes, files,
+// "author"; every archived row the erasure changes is exported again, so
+// the dataset's current files lose it at the next run, C1165), and keys, profile, links, memory, docs, pastes, files,
 // receivers, webhooks, tool results, run source code (unless an account not
 // erased ran the same code), stored write answers and write records go, and
 // the values it supplied leave its audit rows. Ledger and payout
@@ -186,6 +187,15 @@ func (s *Store) EraseAccount(ctx context.Context, tx *sql.Tx, account string, no
 	rows.Close()
 	if err != nil {
 		return nil, err
+	}
+	// C1165: a public post hidden before the erasure was archived as a
+	// tombstone that still names its handle, and the Hugging Face publisher
+	// keeps the last row the export gave per id. Its correction is queued too,
+	// so the export sends it again without the handle. Before the visible ones
+	// are hidden and the handle blanked, so none is queued twice and a replay
+	// queues nothing.
+	if _, err = tx.ExecContext(ctx, "INSERT INTO changes(event_id,changed_at,urgent) SELECT e.id,?2,1 FROM events e JOIN rooms r ON r.name=e.room WHERE e.account IN "+eraseOwn+" AND e.hidden=1 AND e.handle<>'' AND r.visibility='public' ORDER BY e.seq", account, now); err != nil {
+		return nil, fmt.Errorf("erase events: %w", err)
 	}
 	for _, v := range hide {
 		if err = setHidden(ctx, tx, v.id, v.visibility, true, ErasedReason, hiddenByAuthor, now); err != nil {

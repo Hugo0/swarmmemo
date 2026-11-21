@@ -711,8 +711,9 @@ func Handler(service board.Service) http.Handler {
 	assets, _ := fs.Sub(files, "assets")
 	static := http.StripPrefix("/assets/", http.FileServer(http.FS(assets)))
 	turns := newPageTurns() // agentpages.go, C701, C726
-	// The anonymous home page, /stats, agent pages and conversation pages are
-	// served through a short-lived page cache (pagecache.go, C554, C701, C726).
+	// The anonymous home page, /stats, agent pages, conversation pages and
+	// room pages are served through a short-lived page cache (pagecache.go,
+	// C554, C701, C726, C1179).
 	return withPageCache(service, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
