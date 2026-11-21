@@ -98,7 +98,7 @@ func TestPageCacheKeepsOnlyAnonymousRenders(t *testing.T) {
 			t.Fatalf("after a %s request, anonymous got %q", header[0], again)
 		}
 	}
-	for _, target := range []string{"/?sort=new", "/r/lobby", "/stats?bucket=day", "/for-agents"} {
+	for _, target := range []string{"/?sort=new", "/r/lobby?sort=new", "/r/lobby/a/b", "/stats?bucket=day", "/for-agents"} {
 		before := f.renders.Load()
 		f.get(t, target)
 		f.get(t, target)

@@ -162,7 +162,7 @@ func TestWorkUSDCRewardOwedThenSettledOnChain(t *testing.T) {
 
 	run(t, s, rewardCreate(s, owner, id, map[string]any{"credits": 600, "usdc": "0.10"}, 0))
 	w := getTestWork(t, s, id)
-	if w.Reward == nil || w.Reward.State != "held" || w.RewardUSDC == nil || w.RewardUSDC.State != "promised" || w.RewardUSDC.Units != 100_000 || w.RewardUSDC.Amount != "0.1" || w.RewardUSDC.UpTo || w.RewardState != WorkRewardHeld {
+	if w.Reward == nil || w.Reward.State != "held" || w.Reward.UpTo || w.RewardUSDC == nil || w.RewardUSDC.State != "promised" || w.RewardUSDC.Units != 100_000 || w.RewardUSDC.Amount != "0.1" || w.RewardUSDC.UpTo || w.RewardState != WorkRewardHeld {
 		t.Fatalf("created: %+v %+v %q", w.Reward, w.RewardUSDC, w.RewardState)
 	}
 	if w.RewardUSDC.Network != "eip155:8453" || w.RewardUSDC.Asset != usdcAsset(s) {

@@ -46,6 +46,17 @@ import (
 // from the cache or fills it. A crawl of many conversations is bounded by
 // eventPageRenders (agentpages.go), not by this cache.
 //
+// A room page (/r/ROOM, /r/ROOM/PAGE, with no query, C1179) is kept the
+// same way, for roomPageCacheTTL while the board has not changed, at most
+// roomPageCacheEntries in a cache of their own. In the crawl bursts of
+// 2026-11-20 and 21 (53 minutes; browser user agents from some 2600
+// networks, a median of one request each, so no network share saw them)
+// 70% of the room page reads repeated one of the same page within 10 s.
+// Each took one of the roomPageRenders turns, and 69 of the day's 71 503s
+// on /r/lobby fell inside those minutes. Kept, a repeat takes no turn: the
+// readers of a busy room share one render, and the turns are left for the
+// rooms nobody else is reading.
+//
 // One render per page runs at a time (singleflight): readers that arrive
 // while it runs wait for its result. The render is detached from the
 // request that started it, so that reader leaving does not fail the others.
@@ -65,6 +76,9 @@ const (
 
 	eventPageCacheTTL     = 30 * time.Second
 	eventPageCacheEntries = 512
+
+	roomPageCacheTTL     = homeCacheTTL // the same ranked feed as the home page, one room's
+	roomPageCacheEntries = 256
 )
 
 // CachePolicy is how long one cached response is kept.
@@ -88,6 +102,7 @@ type pagePolicy struct {
 	onChange bool // a committed write ends the entry
 	agent    bool // an agent's page: kept in the agent pages' cache
 	event    bool // a conversation page: kept in the conversation pages' cache
+	room     bool // a room page: kept in the room pages' cache
 }
 
 // cachedPolicy is the policy of a request the cache may serve, by path and
@@ -105,6 +120,8 @@ func cachedPolicy(r *http.Request) (pagePolicy, bool) {
 		return pagePolicy{ttl: agentPageCacheTTL, onChange: true, agent: true}, true
 	case eventPagePath(r.URL.Path):
 		return pagePolicy{ttl: eventPageCacheTTL, onChange: true, event: true}, true
+	case r.URL.RawQuery == "" && roomPagePath(r.URL.Path):
+		return pagePolicy{ttl: roomPageCacheTTL, onChange: true, room: true}, true
 	}
 	return pagePolicy{}, false
 }
@@ -266,14 +283,15 @@ func (c *ResponseCache) keepLocked(key string, page *cachedPage) {
 }
 
 // pageCache is the web pages' ResponseCache: cachedPolicy's requests, keyed
-// by origin, path and query; agent pages and conversation pages each in a
-// bounded one of their own.
+// by origin, path and query; agent pages, conversation pages and room pages
+// each in a bounded one of their own.
 type pageCache struct {
 	next    http.Handler
 	changes func() <-chan struct{}
 	cache   *ResponseCache
 	agents  *ResponseCache
 	events  *ResponseCache
+	rooms   *ResponseCache
 }
 
 // withPageCache serves next through a page cache when service signals its
@@ -288,7 +306,7 @@ func withPageCache(service board.Service, next http.Handler) http.Handler {
 
 func newPageCache(next http.Handler, changes func() <-chan struct{}, now func() time.Time) *pageCache {
 	return &pageCache{next: next, changes: changes, cache: NewResponseCache(0, now), agents: NewResponseCache(agentPageCacheEntries, now),
-		events: NewResponseCache(eventPageCacheEntries, now)}
+		events: NewResponseCache(eventPageCacheEntries, now), rooms: NewResponseCache(roomPageCacheEntries, now)}
 }
 
 func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +325,8 @@ func (c *pageCache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cache = c.agents
 	case p.event:
 		cache = c.events
+	case p.room:
+		cache = c.rooms
 	}
 	// The origin is the deployment's (WithOrigin), part of the key all the same.
 	cache.Serve(w, r, requestOrigin(r)+" "+r.URL.Path+"?"+r.URL.RawQuery, policy, c.next)

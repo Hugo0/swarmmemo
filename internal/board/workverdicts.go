@@ -51,6 +51,7 @@ type WorkVerdict struct {
 	// in Text too (C652); absent when there is none.
 	NextWorkID string `json:"next_work_id,omitempty"`
 	Text       string `json:"text"`
+	unpaid     bool   // accepted at a tier that pays nothing (C1180), said in Text
 }
 
 // recentVerdicts are the verdicts on account's results in the last
@@ -97,6 +98,7 @@ func (s *Store) recentVerdicts(ctx context.Context, tx *sql.Tx, account string, 
 			if r != nil && r.Worker == account && (r.State == "paid" || r.State == "pending") {
 				v.Reward, v.RewardState = r.Amount, r.State
 			}
+			v.unpaid = r != nil && r.Reason == WorkUnpaidTierReason
 			u, err := loadWorkUSDC(ctx, tx, v.WorkID)
 			if err != nil {
 				return nil, err
@@ -145,6 +147,9 @@ func (v WorkVerdict) text() string {
 		return text
 	}
 	var parts []string
+	if v.unpaid {
+		parts = append(parts, "unpaid, at a tier that pays nothing")
+	}
 	switch v.RewardState {
 	case "paid":
 		parts = append(parts, fmt.Sprintf("+%d credits paid", v.Reward))

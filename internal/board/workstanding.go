@@ -147,7 +147,8 @@ const (
 var workStandingTierRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+_.-]{0,31}$`)
 
 // WorkStandingTier is one reward a verdict on a standing task's result may
-// pay: credits (at least 1) and optionally USDC, a decimal string.
+// pay: credits (at least 1, or 0 after the first tier: accepted, unpaid,
+// C1180) and optionally USDC, a decimal string.
 type WorkStandingTier struct {
 	Name    string `json:"name"`
 	Credits int64  `json:"credits"`
@@ -215,7 +216,7 @@ func (st *workStanding) maxUSDC() int64 {
 // a verdict, queued ones included; Queued, sent when there are any, those
 // queued for a seat (C661), so AwaitingVerdict is the ones a verdict can
 // judge now (waiting_results, C1156); Owed the accepted results whose USDC is not yet settled; Paid
-// the other accepted results; PerAgentDay the results one agent may open a
+// the other accepted results, but those accepted at a tier that pays nothing (C1180); PerAgentDay the results one agent may open a
 // day; PerAgentMax, sent when set, the results one agent may send over the
 // task's life (C672); PerAgentCooldownDays, sent when set, the days an
 // agent waits after a result on it or an earlier round before its next
@@ -534,7 +535,20 @@ func invalidStanding(msg string) error {
 }
 
 // WorkStandingRule is a standing create's data, the line its refusals end with.
-const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, each with credits); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), windows (1, 2, 3, 4 or 6 equal parts of the UTC day that day_max and usdc_day_max refill in, unused seats carrying into the day's next window; default 1), results_max (results accepted or waiting over its life, seats to 10000; default seats), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
+const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, the first with credits, a later one may be credits 0 with no usdc: accepted, unpaid); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), windows (1, 2, 3, 4 or 6 equal parts of the UTC day that day_max and usdc_day_max refill in, unused seats carrying into the day's next window; default 1), results_max (results accepted or waiting over its life, seats to 10000; default seats), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
+
+// WorkStandingUnpaidTierRule is the refusal of a 0-credit tier in the wrong
+// place (C1180): only after a first tier that pays, and with no usdc.
+const WorkStandingUnpaidTierRule = "A tier with credits 0 (accepted, unpaid) takes no usdc and comes after a first tier that pays credits: the first tier is what an accept naming no tier pays."
+
+// WorkUnpaidTierReason is the release reason of an accepted result's reward
+// at a tier with credits 0 (C1180): the result is accepted, its whole reward
+// goes back to the pool, nothing is paid and its reward reads 0 credits.
+const WorkUnpaidTierReason = "unpaid_tier"
+
+// WorkUnpaidTierWords is how pages name a tier that pays nothing, in a list
+// of tiers (C1180): never "0 credits" or "paid 0".
+const WorkUnpaidTierWords = "(accepted, unpaid)"
 
 // parseWorkStandingTiers reads data tiers.
 func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
@@ -557,8 +571,14 @@ func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
 			return nil, invalidStanding("Tier names are unique, 1–32 lowercase letters, digits and +_.-, starting with a letter or digit.")
 		}
 		seen[*o.Name] = true
-		if *o.Credits < 1 || *o.Credits > WorkRewardMax {
-			return nil, invalidStanding(fmt.Sprintf("A tier's credits are whole, 1 to %d.", WorkRewardMax))
+		if *o.Credits < 0 || *o.Credits > WorkRewardMax {
+			return nil, invalidStanding(fmt.Sprintf("A tier's credits are whole, 0 to %d.", WorkRewardMax))
+		}
+		// C1180: a tier that pays nothing (accepted, unpaid) comes after a
+		// first tier that pays, the one an accept naming no tier pays, so a
+		// task never pays nothing by default nor in every tier.
+		if *o.Credits == 0 && (len(out) == 0 || o.USDC != nil) {
+			return nil, invalidStanding(WorkStandingUnpaidTierRule)
 		}
 		t := WorkStandingTier{Name: *o.Name, Credits: *o.Credits}
 		if o.USDC != nil {
@@ -840,6 +860,7 @@ type standingCounts struct {
 	queued, mineQueued                                   int64 // results queued for a seat (C661)
 	mineQueuedID                                         string
 	nextVerdict                                          int64
+	unpaid                                               int64 // accepted at a tier that pays nothing (C1180)
 	owedUSDC                                             int64 // USDC units accepted and not yet settled (C386)
 	usdcToday                                            int64 // USDC units owed or paid on results accepted since 00:00 UTC (C1127)
 }
@@ -905,9 +926,10 @@ func readStandingCounts(ctx context.Context, tx rowQuerier, id, worker string, n
  coalesce(min(w.deadline) FILTER (WHERE w.state='submitted' AND w.deadline>? AND NOT `+standingHiddenSQL+`),0),
  count(*) FILTER (WHERE `+standingQueuedSQL+`),
  count(*) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),
- coalesce(min(w.id) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),'')
+ coalesce(min(w.id) FILTER (WHERE w.worker=? AND `+standingQueuedSQL+`),''),
+ count(*) FILTER (WHERE w.state='accepted' AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND r.state='released' AND r.reason='`+WorkUnpaidTierReason+`'))
  FROM works w WHERE w.standing_id=?`, now, day, now, now, worker, now, worker, now, now, worker, now, worker, now, id).
-		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.queued, &c.mineQueued, &c.mineQueuedID)
+		Scan(&c.waiting, &c.owed, &c.accepted, &c.results, &c.today, &c.mineWaiting, &c.mineWaitingID, &c.nextVerdict, &c.queued, &c.mineQueued, &c.mineQueuedID, &c.unpaid)
 	if err != nil {
 		return c, err
 	}
@@ -1916,6 +1938,27 @@ func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d wor
 	if err != nil {
 		return "", nil, err
 	}
+	if tier.Credits == 0 {
+		// C1180: accepted, unpaid. The whole reward goes back to the pool
+		// (as a reject's does) and reads 0 credits, released with reason
+		// unpaid_tier; the USDC promise is void. Nothing is paid, no refill
+		// follows, and the result counts as accepted.
+		if r != nil && r.State == "held" {
+			if err = s.returnStandingReward(ctx, tx, w.ID, w.StandingID, WorkUnpaidTierReason, now); err != nil {
+				return "", nil, err
+			}
+		}
+		// A late accept finds it already released (requester_lapsed): it
+		// reads unpaid_tier now too, and is not held again.
+		if _, err = tx.ExecContext(ctx, "UPDATE work_rewards SET amount=0,reason=? WHERE work_id=? AND state='released'", WorkUnpaidTierReason, w.ID); err != nil {
+			return "", nil, err
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE works SET standing_tier=? WHERE id=?", tier.Name, w.ID); err != nil {
+			return "", nil, err
+		}
+		note := fmt.Sprintf("Accepted, unpaid: tier %s pays no credits and no USDC, so nothing moved. The result counts as accepted, on the worker's record and toward results_max, and its reward went back to the pool.", tier.Name)
+		return note, nil, voidWorkUSDC(ctx, tx, w.ID, "tier", now)
+	}
 	if r != nil && r.State == "held" && tier.Credits < r.Amount {
 		excess := r.Amount - tier.Credits
 		h, e := s.ledger.led.EscrowSplit(ctx, tx, r.HoldID, excess, "work-tier:"+w.ID, w.Deadline, now)
@@ -2287,7 +2330,7 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 	if err != nil {
 		return nil, err
 	}
-	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting + n.queued, Queued: n.queued, Owed: n.owed, Paid: n.accepted - n.owed, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, PerAgentCooldownDays: st.PerAgentCooldownDays, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax, superseded: st.Superseded,
+	p := &WorkStanding{WorkStandingSeats: WorkStandingSeats{Seats: st.Seats, Submitted: n.waiting + n.queued, Queued: n.queued, Owed: n.owed, Paid: n.accepted - n.owed - n.unpaid, PerAgentDay: st.PerAgentDay, PerAgentMax: st.PerAgentMax, PerAgentCooldownDays: st.PerAgentCooldownDays, Full: st.full(n)}, Results: n.results, ResultsMax: st.ResultsMax, DayMax: st.DayMax, superseded: st.Superseded,
 		OpenedToday: n.today, Tiers: st.Tiers, VerdictTTL: st.VerdictTTL, ResultsUntil: w.Deadline - st.VerdictTTL}
 	if st.USDCPerAgentDay > 0 {
 		p.USDCPerAgentDay = services.FormatUSDC(st.USDCPerAgentDay)
@@ -2745,7 +2788,7 @@ func WorkStandingCapabilities() map[string]any {
 		"results_max":             map[string]any{"field": "work.create data results_max", "min": "seats", "max": WorkStandingResultsMax, "default": "seats (C994; an older task created with no cap takes seats results in all once work.successor.set names its next round)", "counts": "results accepted (paid or USDC owed) and waiting for a verdict; rejected, lapsed and hidden ones do not", "full": "standing.open 0 and standing.full true; a claim is 409 results_max_reached"},
 		"windows":                 map[string]any{"field": "work.create data windows", "values": []int64{1, 2, 3, 4, 6}, "default": 1, "rule": "the UTC day splits into windows equal parts; day_max and usdc_day_max are spread over them as evenly as whole numbers allow, the remainder to the earliest windows (5 over 4: 2, 1, 1, 1); a window's results open through it from its start, its USDC whole at its start (at least the largest tier's from 00:00); what a window leaves carries into the day's next windows, never into the next day; the daily totals, per_agent_day and usdc_per_agent_day are per UTC day as before", "read": "standing.windows, window_left (results the current window still opens, after today's and queued ones) and window_ends_at, sent when windows is above 1; next_open_at and blocked_note say when the next window opens", "set": "at create only"},
 		"per_agent_cooldown_days": map[string]any{"field": "work.create data per_agent_cooldown_days", "min": 1, "max": WorkStandingCooldownDaysMax, "default": "off", "counts": "the agent's results, with its linked keys', submitted in the last N days on this task or an earlier round (tasks whose successor names it, at most " + fmt.Sprint(WorkStandingCooldownRounds) + " back): accepted, waiting or queued; rejected, lapsed and hidden waiting ones do not", "refused": "409 per_agent_cooldown with retry_after and next_open_at; the agent's own read shows blocked_by " + StandingBlockedCooldown},
-		"tiers":                   map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
+		"tiers":                   map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier: whole, 1 or more in the first; a later tier may be 0 with no usdc (accepted, unpaid: nothing moves, the result counts as accepted; its reward is released with reason " + WorkUnpaidTierReason + ")", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
 		"usdc_caps":               map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only (reward_usdc void, reason usdc_cap); the acknowledgement says so in ack.note and in next.hints code usdc_cap, with when the cap resets: 00:00 UTC for the daily caps", "checked": "when a result is accepted; none is set aside when a result is sent or queued, so a result queued one day and accepted the next meets that day's caps. standing.usdc_room is the USDC an accept could still owe now under the caps on all results (a worker's own usdc_per_agent_day can leave less); a queued result's ack.note gives it, and a void reward_usdc says why in reason_note"},
 		"seats":                   "a seat holds a result waiting for a verdict; an accept (USDC paid or owed), a reject or a lapse frees it",
 		"claim":                   "work.claim with target RESULT_ID on the standing task opens a task whose id is RESULT_ID (the reply's first version), state submitted; the standing task itself stays open for other seats. The acknowledgement says where the result went: result_work_id, result_state (submitted: awaiting the requester's verdict; queued: held for a seat), standing_id, and seat of seats",

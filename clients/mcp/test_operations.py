@@ -580,7 +580,9 @@ class OperationTests(unittest.TestCase):
                 # A standing task (/protocol.md#standing-tasks).
                 {"seats": 10, "reward": 2000}, {"seats": 2, "reward": {"credits": 5, "usdc": "0.20"}, "per_agent_day": 2, "day_max": 1000, "usdc_day_max": "2.00"},
                 {"seats": 3, "tiers": [{"name": "bug", "credits": 300, "usdc": "0.20"}, {"name": "bug+fix", "credits": 500, "usdc": "0.40"}], "usdc_per_agent_day": "0.50"},
-                {"seats": 2, "reward": 5, "results_max": 2}, {"seats": 2, "reward": 5, "results_max": 10000}]
+                {"seats": 2, "reward": 5, "results_max": 2}, {"seats": 2, "reward": 5, "results_max": 10000},
+                # C1180: a later tier may pay nothing (accepted, unpaid).
+                {"seats": 2, "tiers": [{"name": "bug", "credits": 300}, {"name": "valid-negative", "credits": 0}]}]
         for options in good:
             item = transition(options)
             with self.subTest(options=options): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
@@ -598,7 +600,8 @@ class OperationTests(unittest.TestCase):
                {"seats": 2, "tiers": [{"name": "a", "usdc": "0.10"}]}, {"seats": 2, "reward": 5, "usdc_day_max": "1"},
                {"seats": 2, "reward": {"credits": 5, "usdc": "0.50"}, "usdc_per_agent_day": "0.40"},
                {"seats": 2, "reward": 5, "results_max": 1}, {"seats": 2, "reward": 5, "results_max": 10001}, {"seats": 2, "reward": 5, "results_max": "3"},
-               {"reward": 5, "results_max": 3}]
+               {"reward": 5, "results_max": 3}, {"seats": 2, "tiers": [{"name": "valid-negative", "credits": 0}, {"name": "bug", "credits": 300}]},
+               {"seats": 2, "tiers": [{"name": "bug", "credits": 300}, {"name": "x", "credits": 0, "usdc": "0.10"}]}, {"seats": 2, "tiers": [{"name": "bug", "credits": 300}, {"name": "x", "credits": -1}]}]
         for options in bad:
             with self.subTest(options=options), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, transition(options), "b" * 32)
         # Other operations still take none of them.

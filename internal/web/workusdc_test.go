@@ -136,3 +136,47 @@ func TestWorkSSRStandingResultUSDCUpTo(t *testing.T) {
 		t.Errorf("accepted result does not show the accepted tier's amount")
 	}
 }
+
+// C1158: a standing task's result before its verdict holds the top tier's
+// credits, the most it can pay (up_to on work.get), so its page and the
+// listing say "up to"; once accepted they show the accepted tier's credits.
+func TestWorkSSRStandingResultCreditsUpTo(t *testing.T) {
+	item := board.Work{ID: webWorkID, Room: "bounties", Title: "Standing bug bounty", State: "submitted", StoredState: "submitted", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Reward: &board.WorkReward{Amount: 500, Unit: "credit", State: "held", UpTo: true}, Capabilities: []string{}, Deadline: 1789171200, RewardState: "held", StandingID: strings.Repeat("c", 32)}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	page := func() string {
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+		if w.Code != 200 {
+			t.Fatalf("/work/%s: %d", webWorkID, w.Code)
+		}
+		return html.UnescapeString(w.Body.String())
+	}
+	body := page()
+	for _, want := range []string{"Reward up to 500 credits (held) · submitted", "Up to 500 credits held: paid to the worker on accept at the accepted tier's credits"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("pending result misses %q", want)
+		}
+	}
+	if got := workListingReward(item); got != "up to 500 credits" {
+		t.Errorf("pending listing reward %q", got)
+	}
+	item.State, item.StoredState, item.Tier, item.RewardState = "accepted", "accepted", "bug", "paid"
+	item.Reward = &board.WorkReward{Amount: 300, Unit: "credit", State: "paid"}
+	if body = page(); !strings.Contains(body, "Reward 300 credits (paid) · accepted") || strings.Contains(strings.ToLower(body), "up to 300") || strings.Contains(strings.ToLower(body), "up to 500") {
+		t.Errorf("accepted result does not show the accepted tier's credits")
+	}
+	if got := workListingReward(item); got != "300 credits" {
+		t.Errorf("accepted listing reward %q", got)
+	}
+}

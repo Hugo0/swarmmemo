@@ -587,6 +587,10 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     {seats: 2, perAgentCooldownDays: 0}, {seats: 2, perAgentCooldownDays: CONTRACT.limits.work_standing_cooldown_days_maximum + 1}, {seats: 2, perAgentCooldownDays: -1}, {perAgentCooldownDays: 7},
     {seats: 2, windows: 0}, {seats: 2, windows: 5}, {seats: 2, windows: CONTRACT.limits.work_standing_windows_maximum + 2}, {seats: 2, windows: '4'}, {windows: 4}])
     assert.throws(() => workCreateData({title: 't', generation: 'g', ...bad}), errorCode('invalid_option'), JSON.stringify(bad));
+  // C1180: NAME:0 is a tier that pays nothing (accepted, unpaid), after a first tier that pays.
+  assert.deepEqual(workCreateData({title: 't', generation: 'g', seats: 2, tiers: ['bug:5', 'valid-negative:0']}).tiers, [{name: 'bug', credits: 5}, {name: 'valid-negative', credits: 0}]);
+  for (const tiers of [['valid-negative:0', 'bug:5'], ['a:0', 'b:0'], ['bug:5', {name: 'x', credits: 0, usdc: '0.10'}]])
+    assert.throws(() => workCreateData({title: 't', generation: 'g', seats: 2, tiers}), errorCode('invalid_option'), JSON.stringify(tiers));
   assert.equal(requests.length, 0);
   // work.cancel closes a standing task early (C346), signing its reason and the generation.
   await signed.cancelWork(id, 'closed: enough results', {generation, requestId: 'c-1'});

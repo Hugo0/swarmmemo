@@ -85,12 +85,17 @@ CREATE INDEX IF NOT EXISTS work_review_fees_requester ON work_review_fees(reques
 
 // WorkReward is a work item's reward (or reviewer fee) as reads show it.
 // State is held (in escrow), pending (paid, waiting out the requester's
-// transfer delay), paid or released (back to the requester).
+// transfer delay), paid or released (back to the requester). UpTo, sent only
+// when true, marks Amount as the most it can pay, not a promise of that
+// amount: a standing task's result before its verdict, held at the top
+// tier's credits; the accept pays the accepted tier's and returns the rest
+// to the task's pool (C1158, as reward_usdc's up_to, C1154).
 type WorkReward struct {
 	Amount     int64              `json:"amount"`
 	Unit       string             `json:"unit"`
 	Fee        int64              `json:"fee"`
 	State      string             `json:"state"`
+	UpTo       bool               `json:"up_to,omitempty"`
 	HeldAt     int64              `json:"held_at"`
 	ExecuteAt  int64              `json:"execute_at,omitempty"`
 	SettledAt  int64              `json:"settled_at,omitempty"`
@@ -492,6 +497,14 @@ func stringColumn(ctx context.Context, tx workQuerier, query string, args ...any
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// markUpTo marks a standing task's result's held reward up_to (C1158), never
+// on 0 credits, so no read says "up to 0".
+func (r *WorkReward) markUpTo(standingResult bool) {
+	if r != nil {
+		r.UpTo = standingResult && r.State == "held" && r.Amount > 0
+	}
 }
 
 // projectWorkReward is a work's reward (or reviewer fee, by table) as reads

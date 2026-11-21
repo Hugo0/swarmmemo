@@ -367,8 +367,8 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	if held := creditIn(t, s, requester, "held"); held != 1500 {
 		t.Fatalf("pool %d, want 1500", held)
 	}
-	if w := getTestWork(t, s, id); w.RewardUSDC != nil {
-		t.Fatalf("the standing task itself promises USDC: %+v", w.RewardUSDC)
+	if w := getTestWork(t, s, id); w.RewardUSDC != nil || w.Reward == nil || w.Reward.UpTo {
+		t.Fatalf("the standing task itself promises USDC, or its pool reads up_to: %+v %+v", w.RewardUSDC, w.Reward)
 	}
 	// Its mark on message reads carries the terms per result beside the
 	// pool, so a feed never shows the pool as one result's reward (C434).
@@ -391,14 +391,25 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	if u, _ := run(t, s, Command{Operation: "work.history", MessageID: r1}).Data["reward_usdc"].(*WorkRewardUSDC); u == nil || !u.UpTo || u.AmountWords() != "up to 0.4 USDC" {
 		t.Fatalf("history reward_usdc: %+v", u)
 	}
+	// C1158: its credits likewise: held at the top tier's 500, the most it
+	// can pay, so up_to, on work.get and work.history alike.
+	if w := getTestWork(t, s, r1); w.Reward == nil || w.Reward.State != "held" || w.Reward.Amount != 500 || !w.Reward.UpTo {
+		t.Fatalf("held: %+v", w.Reward)
+	}
+	if r, _ := run(t, s, Command{Operation: "work.history", MessageID: r1}).Data["reward"].(*WorkReward); r == nil || !r.UpTo {
+		t.Fatalf("history reward: %+v", r)
+	}
 	r2, c2 := standingClaim(t, s, w2, id, map[string]any{"payout_address": usdcOther})
 	run(t, s, c2)
+	if w := getTestWork(t, s, r2); w.Reward == nil || !w.Reward.UpTo {
+		t.Fatalf("r2 held: %+v", w.Reward)
+	}
 
 	// bug+fix: 500 credits and 0.40 USDC owed.
 	if owedRes := run(t, s, workWith(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}, map[string]any{"tier": "bug+fix"})); owedRes.Next != nil && len(owedRes.Next.Hints) > 0 {
 		t.Fatalf("an accept that owes USDC has hints: %+v", owedRes.Next.Hints)
 	}
-	if w := getTestWork(t, s, r1); w.Tier != "bug+fix" || w.Reward.Amount != 500 || w.RewardUSDC.State != "payable" || w.RewardUSDC.Amount != "0.4" || w.RewardUSDC.UpTo || w.RewardUSDC.AmountWords() != "0.4 USDC" {
+	if w := getTestWork(t, s, r1); w.Tier != "bug+fix" || w.Reward.Amount != 500 || w.Reward.UpTo || w.RewardUSDC.State != "payable" || w.RewardUSDC.Amount != "0.4" || w.RewardUSDC.UpTo || w.RewardUSDC.AmountWords() != "0.4 USDC" {
 		t.Fatalf("bug+fix: %+v %+v", w.Reward, w.RewardUSDC)
 	}
 	if got := creditIn(t, s, keyID(w1), "remaining"); got != 500 {
@@ -427,7 +438,7 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 		t.Fatal("usdc_cap has no plain words")
 	}
 	w := getTestWork(t, s, r2)
-	if w.Tier != "bug" || w.Reward.Amount != 300 || w.Reward.State != "paid" || w.Reward.Receipt == nil || w.RewardUSDC.State != "void" || w.RewardUSDC.Reason != "usdc_cap" {
+	if w.Tier != "bug" || w.Reward.Amount != 300 || w.Reward.State != "paid" || w.Reward.UpTo || w.Reward.Receipt == nil || w.RewardUSDC.State != "void" || w.RewardUSDC.Reason != "usdc_cap" {
 		t.Fatalf("capped: %+v %+v", w.Reward, w.RewardUSDC)
 	}
 	if got := creditIn(t, s, keyID(w2), "remaining"); got != 300 {

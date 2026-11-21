@@ -230,7 +230,7 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 	// (requester_lapsed), from its deadline.
 	rows, err := tx.QueryContext(ctx, `SELECT `+workColumns+`,`+eff+` FROM works w
  WHERE (w.state IN ('open','claimed','submitted') AND ((w.worker=? AND `+eff+` IN ('claimed','submitted','queued')) OR (w.requester=? AND `+eff+` IN ('open','claimed','submitted')) OR (w.reviewer=? AND `+eff+`='submitted')))
- OR (w.state='accepted' AND w.worker=? AND w.updated_at>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND r.state IN ('pending','paid')))
+ OR (w.state='accepted' AND w.worker=? AND w.updated_at>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id AND (r.state IN ('pending','paid') OR r.reason='`+WorkUnpaidTierReason+`')))
  OR (w.state='submitted' AND w.reviewer='' AND w.worker=? AND w.deadline<=? AND w.deadline>=? AND EXISTS(SELECT 1 FROM work_rewards r WHERE r.work_id=w.id))
  OR (w.state='submitted' AND w.requester=? AND w.reviewer='' AND w.standing_id='' AND w.generation=? AND w.deadline<=? AND w.deadline>?)
  ORDER BY w.updated_at DESC, w.id LIMIT ?`,
@@ -285,6 +285,8 @@ func (s *Store) journalWork(ctx context.Context, tx *sql.Tx, a actor, now int64)
 			role, next = "worker", "Submitted; waiting for the named reviewer's verdict."
 		case r.w.Worker == a.account && r.state == "submitted":
 			role, next = "worker", "Submitted; waiting for the requester's review."
+		case r.w.Worker == a.account && r.state == "accepted" && p.UnpaidTier():
+			role, next = "worker", "Accepted, unpaid: the requester accepted it at tier "+p.Tier+", which pays nothing. It counts as accepted on your work record."
 		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil && p.Reward.State == "pending":
 			role, next = "worker", fmt.Sprintf("Accepted; the reward of %d credits is paid at execute_at, after the requester's transfer delay.", p.Reward.Amount)
 		case r.w.Worker == a.account && r.state == "accepted" && p.Reward != nil:

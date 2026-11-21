@@ -237,6 +237,16 @@ class StandingCreateTest(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             memo.build_parser().parse_args(["work", "create", "a" * 32, "--title", "t", "--tier", "bug:x"])
 
+    def test_unpaid_tier_after_a_paying_one(self):
+        # C1180: NAME:0 parses (accepted, unpaid), after a first tier that pays.
+        args = memo.build_parser().parse_args(["work", "create", "a" * 32, "--title", "t", "--seats", "2", "--tier", "bug:5", "--tier", "valid-negative:0"])
+        self.assertEqual(args.tiers, [{"name": "bug", "credits": 5}, {"name": "valid-negative", "credits": 0}])
+        data = memo.work_create_data("t", "g", seats=2, tiers=args.tiers)
+        self.assertEqual(data["tiers"][1], {"name": "valid-negative", "credits": 0})
+        for tiers in (["valid-negative:0", "bug:5"], ["a:0", "b:0"], ["bug:5", {"name": "x", "credits": 0, "usdc": "0.10"}]):
+            with self.subTest(tiers=tiers), self.assertRaises(ValueError):
+                memo.work_create_data("t", "g", seats=2, tiers=tiers)
+
 
 class WorkCancelTest(unittest.TestCase):
     """C346: the requester closes a standing task early with work.cancel, from the
