@@ -227,6 +227,12 @@ const (
 	WorkCapabilitiesMax = 16
 )
 
+// UnpaidTier says whether this standing result was accepted at a tier that
+// pays nothing (C1180): accepted, unpaid, its reward 0 credits, released.
+func (w Work) UnpaidTier() bool {
+	return w.Reward != nil && w.Reward.Reason == WorkUnpaidTierReason
+}
+
 // ResultEdited says whether the worker edited the submitted result since.
 func (w Work) ResultEdited() bool {
 	return w.ResultChangedSinceSubmit != nil && *w.ResultChangedSinceSubmit
@@ -1738,9 +1744,10 @@ func (s *Store) workStep(ctx context.Context, tx *sql.Tx, c Command, a actor, no
 		}
 		switch c.Operation {
 		case "work.accept":
-			if late {
+			if late && (r == nil || r.Reason != WorkUnpaidTierReason) {
 				// The sweeper released the reward at the deadline: hold it
-				// again from the requester, to pay it below.
+				// again from the requester, to pay it below (not at a tier
+				// that pays nothing, C1180).
 				if sponsored, e := rewardSponsored(ctx, tx, r); e != nil {
 					return Result{}, e
 				} else if sponsored {
@@ -2087,6 +2094,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	if p.Reward, err = s.projectWorkReward(ctx, tx, workRewardsTable, w.ID); err != nil {
 		return Work{}, err
 	}
+	p.Reward.markUpTo(w.StandingID != "")
 	if p.RejectFee, err = s.projectRejectFee(ctx, tx, w); err != nil {
 		return Work{}, err
 	}
@@ -2855,6 +2863,7 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 		return Result{}, workReadError(err)
 	}
 	if reward != nil {
+		reward.markUpTo(w.StandingID != "")
 		r.Data["reward"] = reward
 	}
 	fee, err := s.projectWorkReward(ctx, tx, workReviewFeesTable, w.ID)

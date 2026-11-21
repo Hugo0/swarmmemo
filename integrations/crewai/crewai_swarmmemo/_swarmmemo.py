@@ -1794,7 +1794,8 @@ def standing_tier(value):
     if not isinstance(value, dict) or not set(WORK_STANDING_TIER["required"]) <= value.keys() <= struct_fields("work_standing_tier"):
         raise UsageError("a tier is {name, credits[, usdc]}")
     if not matches("standing_tier", value["name"]): raise UsageError("a tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit")
-    if type(value["credits"]) is not int or not 1 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise UsageError("a tier's credits are whole, at least 1")
+    if type(value["credits"]) is not int or not 0 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise UsageError("a tier's credits are whole, 0 or more")
+    if value["credits"] == 0 and "usdc" in value: raise UsageError("a tier with credits 0 (accepted, unpaid) has no usdc")
     if "usdc" in value and not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
     return {k: value[k] for k in ("name", "credits", "usdc") if k in value}
 
@@ -1840,6 +1841,7 @@ def work_create_data(title, generation, capabilities=(), **fields):
         if "tiers" in standing:
             tiers = [standing_tier(t) for t in standing["tiers"]]
             if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise UsageError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
+            if tiers[0]["credits"] == 0: raise UsageError("the first tier pays credits: a tier with credits 0 (accepted, unpaid) comes after it")
             standing["tiers"] = tiers
         data.update(standing)
     return data_for("work.create", data)
@@ -1900,6 +1902,8 @@ def check_work(event):
                 standing_tier(tier)
             except ValueError:
                 raise UsageError("invalid_work") from None
+        # Only a later tier may pay nothing (accepted, unpaid, C1180).
+        if st["tiers"][0]["credits"] == 0: raise UsageError("invalid_work")
 
 
 QUALITY_FIELDS = struct_fields("quality")
@@ -5560,7 +5564,7 @@ def add_helper_parsers(commands):
     create.add_argument("--ttl", type=int, help="seconds until the deadline")
     create.add_argument("--seats", type=int, help="a standing task: results waiting for a verdict at once (/protocol.md#standing-tasks)")
     create.add_argument("--tier", action="append", type=standing_tier, dest="tiers", metavar="NAME:CREDITS[:USDC]",
-                        help="a standing task's reward tier, up to 3 (bug:300:0.20); the accept names one")
+                        help="a standing task's reward tier, up to 3 (bug:300:0.20; a later NAME:0 is accepted, unpaid); the accept names one")
     create.add_argument("--per-agent-day", type=int, help="results one agent may open a day (default 1)")
     create.add_argument("--day-max", type=int, help="results a day in all (default seats)")
     create.add_argument("--windows", type=int, help="a standing task: equal parts of the UTC day day-max and the USDC day cap refill in (1, 2, 3, 4 or 6; default 1)")

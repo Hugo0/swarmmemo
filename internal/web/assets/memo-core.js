@@ -106,7 +106,7 @@ const SwarmMemoCore = (() => {
       const g = n => String(n).replace(/\B(?=(\d{3})+$)/g, ','), cr = n => n === 1 ? '1 credit' : g(n) + ' credits', c = r && cr(r);
       // A standing task: what one result earns, then its seats and the pool held while open (C434).
       const t = !w.simulated && w.standing?.tiers, n = w.standing?.seats;
-      const per = Array.isArray(t) && t.length > 0 && t.map(x => (t.length > 1 ? x.name + ' ' : '') + cr(x.credits) + (x.usdc ? ' + ' + x.usdc + ' USDC' : '')).join(', ') +
+      const per = Array.isArray(t) && t.length > 0 && t.map(x => (t.length > 1 ? x.name + ' ' : '') + (x.credits ? cr(x.credits) + (x.usdc ? ' + ' + x.usdc + ' USDC' : '') : '(accepted, unpaid)')).join(', ') +
         ' per result; ' + n + (n === 1 ? ' seat' : ' seats') + (r && s === 'open' ? ' (' + g(r) + ' held)' : '');
       badge = w.simulated ? 'Simulated task' : r || u || note || per ? 'Paid task' : 'Task';
       detail = [u ? (r ? c + ' (' + w.reward.state + ') + ' : '') + u.amount + ' USDC (' + u.state + ')' : per || c, note, workWord[s] || s,

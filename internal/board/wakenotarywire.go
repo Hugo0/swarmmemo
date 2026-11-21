@@ -7,6 +7,7 @@ package board
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -252,6 +253,11 @@ const notaryNotFoundByHash = `No receipt stamps that hash. Have the receipt's se
 func notaryNotFound(details any) error {
 	d, _ := details.(services.NotaryNotFound)
 	switch {
+	case d.Seq == 0 && d.Hash != "" && len(d.Hash) < sha256.Size*2:
+		// A prefix that starts no stamped hash (Skitter c597, 11-21): said
+		// apart from a full hash with no receipt, since a truncated or
+		// mis-copied hash is the commonest cause.
+		return problem(404, "notary_not_found", fmt.Sprintf("No stamped hash starts with %s (a %d-digit prefix). A prefix reads as the one stamped hash it starts, so check that it is the hash's start, copied exactly, not a truncated or mis-copied one; the full hash makes the lookup exact. ", d.Hash, len(d.Hash))+notaryNotFoundByHash)
 	case d.Seq == 0:
 		return problem(404, "notary_not_found", notaryNotFoundByHash)
 	case d.SeqHash == "" && d.Hash == "":

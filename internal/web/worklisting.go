@@ -194,7 +194,7 @@ func workListingReward(item board.Work) string {
 		parts = append(parts, standingRewardText(item.Standing.Tiers, item.Standing.Seats, 0, ""))
 	} else {
 		if item.Reward != nil {
-			parts = append(parts, creditAmount(item.Reward.Amount))
+			parts = append(parts, rewardCredits(item.Reward))
 		}
 		if item.RewardUSDC != nil {
 			parts = append(parts, item.RewardUSDC.AmountWords())

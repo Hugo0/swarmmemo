@@ -491,9 +491,12 @@ type compactWorkUSDC struct {
 	State  string `json:"state"`
 }
 
+// compactWorkReward is a row's reward or reject_fee; UpTo as read_work's
+// reward (C1158).
 type compactWorkReward struct {
 	Amount int64  `json:"amount"`
 	Unit   string `json:"unit"`
+	UpTo   bool   `json:"up_to,omitempty"`
 	State  string `json:"state"`
 }
 
@@ -515,7 +518,7 @@ func compactWorks(result *board.Result, origin string) error {
 			row.Standing = &compactWorkStanding{WorkStandingSeats: w.Standing.WorkStandingSeats, Tiers: w.Standing.Tiers}
 		}
 		if w.Reward != nil {
-			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, State: w.Reward.State}
+			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, UpTo: w.Reward.UpTo, State: w.Reward.State}
 		}
 		if w.RejectFee != nil {
 			row.RejectFee = &compactWorkReward{Amount: w.RejectFee.Amount, Unit: w.RejectFee.Unit, State: w.RejectFee.State}

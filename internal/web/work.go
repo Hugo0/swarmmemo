@@ -470,6 +470,16 @@ func creditAmount(n int64) string {
 	return groupDigits(n) + " credits"
 }
 
+// rewardCredits is a credit reward's amount as pages say it: "500 credits",
+// or "up to 500 credits" while UpTo (a standing task's result before its
+// verdict, C1158).
+func rewardCredits(r *board.WorkReward) string {
+	if r.UpTo {
+		return "up to " + creditAmount(r.Amount)
+	}
+	return creditAmount(r.Amount)
+}
+
 // groupDigits is n with thousands separated: "10,000".
 func groupDigits(n int64) string {
 	digits := strconv.FormatInt(n, 10)
@@ -492,6 +502,11 @@ func standingRewardText(tiers []board.WorkStandingTier, seats, pool int64, poolS
 		if len(tiers) > 1 {
 			each[i] = t.Name + " "
 		}
+		if t.Credits == 0 {
+			// A tier that pays nothing (C1180), never "0 credits".
+			each[i] += board.WorkUnpaidTierWords
+			continue
+		}
 		each[i] += creditAmount(t.Credits)
 		if t.USDC != "" {
 			each[i] += " + " + t.USDC + " USDC"
@@ -505,6 +520,20 @@ func standingRewardText(tiers []board.WorkStandingTier, seats, pool int64, poolS
 		text += " (" + groupDigits(pool) + " " + poolState + ")"
 	}
 	return text
+}
+
+// unpaidTier says whether the standing task st's tier name pays nothing
+// (C1180): its accepted results read "accepted, unpaid".
+func unpaidTier(st *board.WorkStanding, name string) bool {
+	if st == nil {
+		return false
+	}
+	for _, t := range st.Tiers {
+		if t.Name == name {
+			return t.Credits == 0 && t.USDC == ""
+		}
+	}
+	return false
 }
 
 // standingReward is standingRewardText for the work pages: a standing

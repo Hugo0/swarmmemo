@@ -455,7 +455,9 @@ def _valid_create_options(data):
             names = set()
             for tier in tiers:
                 if (not isinstance(tier, dict) or set(tier) - {"name", "credits", "usdc"} or not isinstance(tier.get("name"), str)
-                        or not re.fullmatch(STANDING_TIER, tier["name"]) or tier["name"] in names or not whole(tier.get("credits"), 1, WORK_REWARD_MAX)): return False
+                        or not re.fullmatch(STANDING_TIER, tier["name"]) or tier["name"] in names or not whole(tier.get("credits"), 0, WORK_REWARD_MAX)): return False
+                # A tier with credits 0 (accepted, unpaid, C1180): after a first tier that pays, with no usdc.
+                if tier["credits"] == 0 and (not names or "usdc" in tier): return False
                 names.add(tier["name"])
                 if "usdc" in tier:
                     units = _usdc_units(tier["usdc"])

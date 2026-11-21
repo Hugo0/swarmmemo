@@ -1792,7 +1792,8 @@ export function standingTier(value) {
   const tier = CONTRACT.structs.work_standing_tier;
   if (!value || typeof value !== 'object' || Array.isArray(value) || !tier.required.every(k => Object.hasOwn(value, k)) || Object.keys(value).some(k => !structFields('work_standing_tier').includes(k))) fail('invalid_option', 'A tier is {name, credits, usdc?}.');
   if (typeof value.name !== 'string' || !new RegExp(CONTRACT.patterns.standing_tier).test(value.name)) fail('invalid_option', 'A tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit.');
-  if (!Number.isSafeInteger(value.credits) || value.credits < 1 || value.credits > CONTRACT.limits.work_reward_maximum) fail('invalid_option', 'A tier’s credits are whole, at least 1.');
+  if (!Number.isSafeInteger(value.credits) || value.credits < 0 || value.credits > CONTRACT.limits.work_reward_maximum) fail('invalid_option', 'A tier’s credits are whole, 0 or more.');
+  if (value.credits === 0 && value.usdc !== undefined) fail('invalid_option', 'A tier with credits 0 (accepted, unpaid) has no usdc.');
   if (value.usdc !== undefined && typeof value.usdc !== 'string') fail('invalid_option', 'A tier’s usdc is a decimal string, e.g. 0.20.');
   return {name: value.name, credits: value.credits, ...(value.usdc !== undefined ? {usdc: value.usdc} : {})};
 }
@@ -1845,6 +1846,7 @@ export function workCreateData({title, generation, capabilities = [], reward, re
     if (perAgentCooldownDays != null && !whole(perAgentCooldownDays, 1, limits.work_standing_cooldown_days_maximum)) fail('invalid_option', `perAgentCooldownDays is 1 to ${limits.work_standing_cooldown_days_maximum}.`);
     if (tiers != null && (!Array.isArray(tiers) || tiers.length < 1 || tiers.length > limits.work_standing_tiers_maximum)) fail('invalid_option', `tiers are 1 to ${limits.work_standing_tiers_maximum}.`);
     for (const name of set) data[name] = name === 'tiers' ? tiers.map(standingTier) : standing[camel(name)];
+    if (data.tiers?.[0].credits === 0) fail('invalid_option', 'The first tier pays credits: a tier with credits 0 (accepted, unpaid) comes after it.');
   }
   return dataFor('work.create', data);
 }

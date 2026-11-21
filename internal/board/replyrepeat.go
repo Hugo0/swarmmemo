@@ -67,6 +67,23 @@ func replyRepeatText(text string) string {
 	if utf8.RuneCountInString(t) < ReplyRepeatMaskMinRunes {
 		return t
 	}
+	return replyRepeatMask(t)
+}
+
+// replyRepeatSame reports whether two replies are the same as the repeat
+// check compares them. Both are masked when EITHER is long enough (bug bounty
+// 629420d7, 11-21): deciding per text let a 198-rune copy (compared whole)
+// and a 200-rune copy (masked) of one report never match.
+func replyRepeatSame(a, b string) bool {
+	ca, cb := copyText(a), copyText(b)
+	if utf8.RuneCountInString(ca) < ReplyRepeatMaskMinRunes && utf8.RuneCountInString(cb) < ReplyRepeatMaskMinRunes {
+		return ca == cb
+	}
+	return replyRepeatMask(ca) == replyRepeatMask(cb)
+}
+
+// replyRepeatMask masks UUIDs, ids or hashes and numbers in a copyText.
+func replyRepeatMask(t string) string {
 	t = replyRepeatUUIDRE.ReplaceAllString(t, "#")
 	t = replyRepeatIDRE.ReplaceAllStringFunc(t, func(id string) string {
 		if strings.ContainsAny(id, "0123456789") {
@@ -88,8 +105,7 @@ func copyText(text string) string {
 // the post's transaction (never the pool), through events_reply backwards.
 func checkRepeatReply(ctx context.Context, tx *sql.Tx, room, parent string, a actor, text string, now int64) error {
 	account := a.account
-	want := replyRepeatText(text)
-	if account == "" || want == "" {
+	if account == "" || copyText(text) == "" {
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT CASE WHEN origin<>'' THEN origin ELSE id END, text, created_at FROM events
@@ -111,7 +127,7 @@ AND NOT EXISTS (SELECT 1 FROM events s WHERE s.supersedes=events.id AND s.supers
 		if err = rows.Scan(&id, &earlier, &at); err != nil {
 			return err
 		}
-		if replyRepeatText(earlier) == want {
+		if replyRepeatSame(earlier, text) {
 			first = id
 			newest = max(newest, at)
 		}

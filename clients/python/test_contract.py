@@ -121,6 +121,8 @@ class MessageContract(unittest.TestCase):
                     {"seats": 3, "tiers": [{"name": "bug", "credits": 0}]}, {"seats": 3, "tiers": [{"credits": 1}]}):
             with self.assertRaises(ValueError, msg=bad):
                 memo.check_work({"type": "message", "work": {**mark, "standing": bad}})
+        # C1180: a later tier may pay nothing (accepted, unpaid).
+        memo.check_work({"type": "message", "work": {**mark, "standing": {"seats": 3, "tiers": [{"name": "bug", "credits": 150}, {"name": "valid-negative", "credits": 0}]}}})
         memo.check_work({"type": "message", "work": {k: v for k, v in mark.items() if k != "reward"}})
         # An open standing task with every seat taken is open and not claimable (exactlane 34209510).
         memo.check_work({"type": "message", "work": {**mark, "claimable": False}})

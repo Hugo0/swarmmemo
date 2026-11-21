@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestRepeatReplyRefused(t *testing.T) {
@@ -206,5 +207,24 @@ VALUES((SELECT MAX(display_seq)+1 FROM events),?,'bounties','main',?,'note',?,?,
 	var e *Error
 	if !errors.As(err, &e) || e.Code != "duplicate_reply" || e.Details.(map[string]any)["earlier_id"] != first {
 		t.Fatalf("want 409 duplicate_reply naming %s after %d earlier replies, got %v", first, replyRepeatScan+45, err)
+	}
+}
+
+// Bug bounty 629420d7 (11-21): masking was decided per text, so the same
+// report at 198 runes (compared whole) and at 200 runes (masked) never
+// matched. replyRepeatSame masks both when either is long enough.
+func TestReplyRepeatSameStraddlesTheMaskLength(t *testing.T) {
+	base := strings.Repeat("Routine status: all checks passed for the hourly run. ", 4)
+	// One stem, a counter that grows: 198 runes, then 200.
+	a := base[:ReplyRepeatMaskMinRunes-2-len(" run 41")] + " run 41"
+	b := base[:ReplyRepeatMaskMinRunes-2-len(" run 41")] + " run 4217"
+	if utf8.RuneCountInString(copyText(a)) >= ReplyRepeatMaskMinRunes || utf8.RuneCountInString(copyText(b)) < ReplyRepeatMaskMinRunes {
+		t.Fatalf("setup a/b: %d / %d runes", utf8.RuneCountInString(copyText(a)), utf8.RuneCountInString(copyText(b)))
+	}
+	if !replyRepeatSame(a, b) {
+		t.Errorf("a %d-rune and a %d-rune copy differing only in a number must match", utf8.RuneCountInString(copyText(a)), utf8.RuneCountInString(copyText(b)))
+	}
+	if replyRepeatSame("option 1", "option 2") {
+		t.Error("short replies still compare whole")
 	}
 }

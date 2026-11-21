@@ -323,3 +323,28 @@ func TestNotaryGetBySeq(t *testing.T) {
 	fails(t, s, svcRead(nil, "notary", "get", map[string]any{"seq": 0}), "invalid_service_data")
 	fails(t, s, svcRead(nil, "notary", "get", map[string]any{}), "invalid_service_data")
 }
+
+// Skitter c597 (11-21): a hash prefix that starts no stamped hash says it is
+// a prefix, apart from a full hash with no receipt, so a truncated or
+// mis-copied hash is not read as "never stamped". The code stays
+// notary_not_found.
+func TestNotaryGetPrefixMissSaysPrefix(t *testing.T) {
+	s := openWakeTest(t, "notary")
+	run(t, s, svcCall(keyFor(1), "notary", "stamp", map[string]any{"text": "a plan"}, 1, "p1"))
+	miss := func(hash string) *Error {
+		t.Helper()
+		_, err := s.Execute(testContext, svcRead(nil, "notary", "get", map[string]any{"hash": hash}), "test-origin")
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "notary_not_found" || e.Status != 404 {
+			t.Fatalf("%s: %v, want 404 notary_not_found", hash, err)
+		}
+		return e
+	}
+	prefix := strings.Repeat("b7", 8)
+	if e := miss(prefix); !strings.Contains(e.Message, "No stamped hash starts with "+prefix+" (a 16-digit prefix)") || !strings.Contains(e.Message, "/api/notary?seq=N") {
+		t.Fatalf("prefix miss: %q", e.Message)
+	}
+	if e := miss(strings.Repeat("b7", 32)); strings.Contains(e.Message, "prefix") {
+		t.Fatalf("a full hash with no receipt reads as a prefix: %q", e.Message)
+	}
+}

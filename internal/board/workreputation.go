@@ -105,7 +105,9 @@ func (side *WorkRecordSide) add(outcome string, at, credits, usdc int64) {
 
 // workAttemptsSQL is every claim on public rewarded work, with its outcome
 // (accepted, rejected, expired or "" while open or undecided), the verdict's
-// time, the paid reward by unit, and (filtered on) the reward's face value. Arguments: now twice, then the minimum
+// time, the paid reward by unit, and (filtered on) the reward's face value
+// (a standing result accepted at a tier that pays nothing, C1180: the top
+// tier's credits its seat held, so it counts accepted, not paid). Arguments: now twice, then the minimum
 // reward; workRecords adds the account filter at the two %s: the first
 // (workAccountsSQL) keeps the work items the accounts could be on, so a
 // profile's read never computes every claim on the board (C701), the second
@@ -128,7 +130,7 @@ var workAttemptsFromSQL = `
   coalesce(v.accepted_at,0) AS at,
   CASE WHEN r.state IN ('paid','pending') THEN r.amount ELSE 0 END AS credits,
   CASE WHEN u.state='paid' THEN u.amount ELSE 0 END AS usdc,
-  coalesce(r.amount,0)+coalesce(u.amount,0) AS reward
+  coalesce(r.amount,0)+coalesce(u.amount,0)+CASE WHEN r.reason='` + WorkUnpaidTierReason + `' THEN coalesce((SELECT max(json_extract(t.value,'$.credits')) FROM work_standing s,json_each(s.tiers) t WHERE s.work_id=w.standing_id),0) ELSE 0 END AS reward
  FROM works w JOIN events e ON e.id=w.id JOIN rooms rm ON rm.name=e.room
  JOIN ` + workerTransitionsSQL("") + ` c ON c.work_id=w.id AND c.operation='work.claim'
  LEFT JOIN work_transitions v ON v.work_id=w.id AND v.fence=c.fence AND v.operation IN ('work.accept','work.reject')
