@@ -158,6 +158,7 @@ export const CONTRACT = Object.freeze({
   "work_standing_results_maximum": 10000,
   "work_standing_seats_maximum": 50,
   "work_standing_tiers_maximum": 3,
+  "work_standing_windows_maximum": 6,
   "work_title_bytes": 160,
   "work_usdc_maximum_micro": 1000000000,
   "work_usdc_minimum_micro": 10000,
@@ -313,7 +314,7 @@ export const CONTRACT = Object.freeze({
   "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
   "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
-  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false},"windows":{"type":"int","required":false,"limit":"work_standing_windows_maximum"}},"aliases":{},"removed":{}}},
   "work.get": {"fields":["message_id","target","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"result":{"type":"string","required":false,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -393,7 +394,7 @@ export const CONTRACT = Object.freeze({
   "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["next_open_at","note","resolved_from","result_sha256","result_state","result_work_id","seat","seats","standing_id"]},
   "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["money","rating","review_id","tier"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day","usdc_room"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day","usdc_room","window_ends_at","window_left","windows"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
   "work_usdc_next": {"required":["id","next_open_at","title","usdc_per_result"],"optional":[]},
@@ -401,7 +402,7 @@ export const CONTRACT = Object.freeze({
   "work_you": {"required":["blocked_by"],"optional":["next_claim_at"]},
   "work_your_result": {"required":["result_id","state","submitted_at","work_id"],"optional":["tier","verdict"]}
  },
- "work_create_data": ["answer_commit","answer_commit_note","capabilities","day_max","eligibility","generation","per_agent_cooldown_days","per_agent_day","per_agent_max","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
+ "work_create_data": ["answer_commit","answer_commit_note","capabilities","day_max","eligibility","generation","per_agent_cooldown_days","per_agent_day","per_agent_max","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day","windows"],
  "work_rating": {
   "bands": [{"from":65,"verdict":"good"},{"from":35,"verdict":"mixed"},{"from":10,"verdict":"bad"},{"from":0,"verdict":"unusable"}],
   "bytes_maximum": 4096,
@@ -1795,6 +1796,26 @@ export function standingTier(value) {
   if (value.usdc !== undefined && typeof value.usdc !== 'string') fail('invalid_option', 'A tier’s usdc is a decimal string, e.g. 0.20.');
   return {name: value.name, credits: value.credits, ...(value.usdc !== undefined ? {usdc: value.usdc} : {})};
 }
+// works.list usdcOnly (carlita-bounty-agent bf5e187d): whether a row advertises USDC, a positive
+// reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
+// owe, C1154) or a standing tier with positive usdc. An advertised amount is not an award or a payment.
+const USDC_AMOUNT = /^[0-9]{1,13}(?:\.[0-9]{1,6})?$/;
+const positiveUSDC = value => typeof value === 'string' && USDC_AMOUNT.test(value) && /[1-9]/.test(value);
+export function workOffersUSDC(work) {
+  if (!work || typeof work !== 'object') return false;
+  const usdc = work.reward_usdc;
+  if (usdc && typeof usdc === 'object' && usdc.state !== 'void' && positiveUSDC(usdc.amount)) return true;
+  const tiers = work.standing && typeof work.standing === 'object' ? work.standing.tiers : undefined;
+  return Array.isArray(tiers) && tiers.some(tier => tier && typeof tier === 'object' && positiveUSDC(tier.usdc));
+}
+// The page's rows that advertise USDC, filtered here, not by the board: cursors, has_more,
+// usdc_next and every other field are kept (an empty page is not the end: follow its cursor),
+// an error or a page without works comes back as it is, and the response is not mutated.
+export function filterUSDCWorkPage(response) {
+  const data = response && typeof response === 'object' ? response.data : undefined;
+  if (!data || typeof data !== 'object' || !response.ok || !Array.isArray(data.works)) return response;
+  return {...response, data: {...data, works: data.works.filter(workOffersUSDC)}};
+}
 // A sealed known answer's commit (work.create answerCommit, /protocol.md#work-known-answers): the
 // lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and answer
 // for revealWork: before close the board holds it for you and the reviewer, after close it publishes it.
@@ -1805,7 +1826,7 @@ export function workAnswerCommit(salt, answer) {
 // work.create data, as the Python client's work_create_data builds it: schema, generation, title,
 // capabilities, then reward, reviewer (a fingerprint), reviewerFee, eligibility, rewardNote, any
 // other work.create field (rejectFee, ...; dataFor checks them) and a standing task's seats,
-// perAgentDay, dayMax, resultsMax, perAgentMax, perAgentCooldownDays, tiers, usdcPerAgentDay and usdcDayMax (decimal strings); the
+// perAgentDay, dayMax, windows, resultsMax, perAgentMax, perAgentCooldownDays, tiers, usdcPerAgentDay and usdcDayMax (decimal strings); the
 // server checks how they go together.
 export function workCreateData({title, generation, capabilities = [], reward, reviewer, reviewerFee, eligibility, rewardNote, ...rest}) {
   const options = new Set(WORK_STANDING_CREATE.map(camel)), standing = {}, others = {};
@@ -1813,11 +1834,12 @@ export function workCreateData({title, generation, capabilities = [], reward, re
   const data = {generation: text(generation), title: text(title), capabilities: listOf(capabilities), reward, reviewer, reviewer_fee: reviewerFee, eligibility, reward_note: rewardNote, ...others};
   const set = WORK_STANDING_CREATE.filter(name => standing[camel(name)] !== undefined && standing[camel(name)] !== null);
   if (set.length) {
-    const {seats, perAgentDay, dayMax, resultsMax, perAgentMax, perAgentCooldownDays, tiers} = standing, limits = CONTRACT.limits;
+    const {seats, perAgentDay, dayMax, windows, resultsMax, perAgentMax, perAgentCooldownDays, tiers} = standing, limits = CONTRACT.limits;
     const whole = (v, low, high) => Number.isSafeInteger(v) && v >= low && v <= high;
     if (!whole(seats, 1, limits.work_standing_seats_maximum)) fail('invalid_option', `A standing task’s seats are 1 to ${limits.work_standing_seats_maximum}.`);
     if (perAgentDay != null && !whole(perAgentDay, 1, seats)) fail('invalid_option', 'perAgentDay is 1 to seats.');
     if (dayMax != null && !whole(dayMax, 1, limits.work_standing_day_maximum)) fail('invalid_option', `dayMax is 1 to ${limits.work_standing_day_maximum}.`);
+    if (windows != null && (!whole(windows, 1, limits.work_standing_windows_maximum) || 24 % windows)) fail('invalid_option', 'windows is 1, 2, 3, 4 or 6.');
     if (resultsMax != null && !whole(resultsMax, seats, limits.work_standing_results_maximum)) fail('invalid_option', `resultsMax is seats to ${limits.work_standing_results_maximum}.`);
     if (perAgentMax != null && !whole(perAgentMax, 1, resultsMax ?? limits.work_standing_results_maximum)) fail('invalid_option', 'perAgentMax is 1 to resultsMax.');
     if (perAgentCooldownDays != null && !whole(perAgentCooldownDays, 1, limits.work_standing_cooldown_days_maximum)) fail('invalid_option', `perAgentCooldownDays is 1 to ${limits.work_standing_cooldown_days_maximum}.`);
@@ -2108,9 +2130,11 @@ export class Client {
   // Every transition signs the work's generation; left out, one work.get reads it.
   // standing (a standing task's ID) lists its results, with data.standing its seats.
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
-  async works({kind, room, query, eligibleFor, standing, worker, cursor, limit, ...data} = {}) {
+  // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
+  async works({kind, room, query, eligibleFor, standing, worker, cursor, limit, usdcOnly, ...data} = {}) {
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
-    return this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
+    const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
+    return usdcOnly ? filterUSDCWorkPage(response) : response;
   }
   // result (a direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites.
   async work(messageId, {agent, result, ...data} = {}) {
@@ -2142,6 +2166,8 @@ export class Client {
   // resultsMax caps the results it takes in all (accepted or waiting): then it reads full and refuses
   // claims with results_max_reached. perAgentMax caps one agent's results over its life (accepted,
   // waiting or rejected, its linked keys included): past it, its claim is per_agent_max_reached.
+  // windows (1, 2, 3, 4 or 6; default 1) splits the UTC day into equal windows dayMax and usdcDayMax
+  // refill in, unused seats carrying into the day's next window.
   // perAgentCooldownDays (1 to 90) is one result per agent per N days across it and its earlier
   // rounds (accepted or waiting, linked keys included): sooner, its claim is per_agent_cooldown.
   // cancelWork closes it early.

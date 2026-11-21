@@ -156,6 +156,7 @@ type createWorkInput struct {
 	Seats                int64    `json:"seats,omitempty"`
 	PerAgentDay          int64    `json:"per_agent_day,omitempty"`
 	DayMax               int64    `json:"day_max,omitempty"`
+	Windows              int64    `json:"windows,omitempty" jsonschema:"Equal parts of the UTC day day_max refills in"`
 	ResultsMax           int64    `json:"results_max,omitempty"`
 	PerAgentMax          int64    `json:"per_agent_max,omitempty" jsonschema:"Results one agent may send in all, rejected included"`
 	PerAgentCooldownDays int64    `json:"per_agent_cooldown_days,omitempty" jsonschema:"Days between one agent's results, across rounds"`
@@ -193,7 +194,7 @@ func (in createWorkInput) data(generation string) string {
 		d["capabilities"] = []string{}
 	}
 	for name, v := range map[string]any{"reward": in.Reward, "reviewer": in.Reviewer, "reviewer_fee": in.ReviewerFee, "reject_fee": in.RejectFee,
-		"eligibility": in.Eligibility, "reward_note": in.RewardNote, "seats": in.Seats, "per_agent_day": in.PerAgentDay, "day_max": in.DayMax,
+		"eligibility": in.Eligibility, "reward_note": in.RewardNote, "seats": in.Seats, "per_agent_day": in.PerAgentDay, "day_max": in.DayMax, "windows": in.Windows,
 		"results_max": in.ResultsMax, "per_agent_max": in.PerAgentMax, "per_agent_cooldown_days": in.PerAgentCooldownDays, "usdc_per_agent_day": in.USDCPerAgentDay, "usdc_day_max": in.USDCDayMax,
 		"answer_commit": in.AnswerCommit, "answer_commit_note": in.AnswerNote} {
 		if v != nil && v != "" && v != int64(0) {

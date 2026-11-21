@@ -440,6 +440,7 @@ def _valid_create_options(data):
         if not whole(seats, 1, LIMITS["work_standing_seats_maximum"]) or {"reviewer", "reviewer_fee", "reject_fee"} & data.keys(): return False
         if "per_agent_day" in data and not whole(data["per_agent_day"], 1, seats): return False
         if "day_max" in data and not whole(data["day_max"], 1, LIMITS["work_standing_day_maximum"]): return False
+        if "windows" in data and (not whole(data["windows"], 1, LIMITS["work_standing_windows_maximum"]) or 24 % data["windows"]): return False
         if "results_max" in data and not whole(data["results_max"], seats, LIMITS["work_standing_results_maximum"]): return False
         if "per_agent_max" in data and not whole(data["per_agent_max"], 1, data.get("results_max", LIMITS["work_standing_results_maximum"])): return False
         if "per_agent_cooldown_days" in data and not whole(data["per_agent_cooldown_days"], 1, LIMITS["work_standing_cooldown_days_maximum"]): return False
@@ -478,6 +479,11 @@ def _standing(standing):
             or any(type(standing[name]) is not int or not 0 <= standing[name] < 2**63 for name in STANDING_COUNTS)
             or any(name in standing and _usdc_units(standing[name]) is None for name in ("usdc_per_agent_day", "usdc_day_max", "usdc_owed", "usdc_owed_max", "usdc_room"))
             or ("next_open_at" in standing and (type(standing["next_open_at"]) is not int or not 0 < standing["next_open_at"] < 2**63))
+            # windows, window_left and window_ends_at: the day's refill windows, sent together above 1 (C1170).
+            or ("windows" in standing and (type(standing["windows"]) is not int or not 2 <= standing["windows"] <= LIMITS["work_standing_windows_maximum"]
+                                           or 24 % standing["windows"] or type(standing.get("window_left")) is not int or not 0 <= standing["window_left"] <= standing["day_max"]
+                                           or type(standing.get("window_ends_at")) is not int or not 0 < standing["window_ends_at"] < 2**63))
+            or (("window_left" in standing or "window_ends_at" in standing) and "windows" not in standing)
             # queued: results held for a seat, counted in submitted too (C661).
             or ("queued" in standing and (type(standing["queued"]) is not int or not 0 < standing["queued"] <= standing["submitted"]))
             # blocked_by and blocked_note: why no result can open now, a token and its line (C444).

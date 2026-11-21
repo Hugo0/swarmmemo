@@ -41,6 +41,17 @@ package board
 // Once they reach it the task is full: standing.open reads 0, standing.full
 // true, and a claim is 409 results_max_reached. The requester stops a
 // standing task early with work.cancel on the task itself.
+// It bounds the results accepted with no check at accept (C1175): a result
+// waiting for a verdict already holds its place, so an accept never finds
+// the cap taken, and accepted (standing.paid + standing.owed) never passes
+// results_max. A reject frees its place on purpose: the brief and the pool
+// are sized to the results paid, and a rejected one is never paid, so the
+// next worker can take it. standing.results counts every result opened,
+// rejected and lapsed ones too, so it may read above results_max (round 6
+// of the official-number task: 21 results, 17 accepted, 4 rejected, at
+// results_max 20). The one exception is C994's: an uncapped round capped
+// at seats once its successor is named keeps the verdicts of the results
+// already waiting, so it may accept a few past seats.
 //
 // Per-agent cap (C672). Optional per_agent_max bounds the results one agent
 // sends over the task's life: accepted, waiting for a verdict, or rejected
@@ -123,7 +134,11 @@ const (
 	// WorkStandingCooldownRounds bounds how many earlier rounds a
 	// per_agent_cooldown_days claim check follows back (C830).
 	WorkStandingCooldownRounds = 50
-	WorkStandingTierFirst      = "reward" // the one tier a reward (no tiers) makes
+	// WorkStandingWindowsMax bounds windows, the equal parts of the UTC
+	// day day_max and usdc_day_max refill in (C1170): 1, 2, 3, 4 or 6,
+	// whole hours each.
+	WorkStandingWindowsMax = 6
+	WorkStandingTierFirst  = "reward" // the one tier a reward (no tiers) makes
 	// WorkStandingVerdictTTL is each result's own verdict deadline, from the
 	// claim that opened it: 3 days.
 	WorkStandingVerdictTTL int64 = 3 * 86400
@@ -153,6 +168,7 @@ type workStandingData struct {
 	ResultsMax                          int64 // 0: no cap
 	PerAgentMax                         int64 // 0: no cap (C672)
 	PerAgentCooldownDays                int64 // 0: off (C830)
+	Windows                             int64 // 0: unset, one window (C1170)
 	Tiers                               []WorkStandingTier
 	USDCPerAgentDayText, USDCDayMaxText string
 	USDCPerAgentDay, USDCDayMax         int64
@@ -165,6 +181,7 @@ type workStanding struct {
 	ResultsMax                  int64 // 0: no cap (C346); seats once a successor is named (C994)
 	PerAgentMax                 int64 // 0: no cap (C672)
 	PerAgentCooldownDays        int64 // 0: off (C830)
+	Windows                     int64 // the UTC day's refill windows, 1 unless set (C1170)
 	Tiers                       []WorkStandingTier
 	USDCPerAgentDay, USDCDayMax int64
 	VerdictTTL                  int64
@@ -267,7 +284,8 @@ func WorkStandingSeatNames() []string {
 }
 
 // WorkStanding is a standing root's seats as reads show them: the seat
-// summary, flattened, and the rest. Results is every result it opened;
+// summary, flattened, and the rest. Results is every result it opened,
+// rejected and lapsed ones included (so it may pass ResultsMax, C1175);
 // ResultsMax, when set, the accepted and waiting results it takes in all;
 // OpenedToday the day's results day_max counts (waiting or accepted, C614).
 // USDCOwed and USDCOwedMax, sent when a tier pays USDC, are the USDC owed and
@@ -294,6 +312,14 @@ type WorkStanding struct {
 	// (BriefDateMismatch, C1097), as written there: results_until is the
 	// date the board enforces. Absent when the brief names none, or the same.
 	BriefDateMismatch string `json:"brief_date_mismatch,omitempty"`
+	// Windows, WindowLeft and WindowEndsAt are sent only on a task created
+	// with windows above 1 (C1170): the UTC day's refill windows, the
+	// results day_max still opens in the current one (its share and what
+	// earlier windows left, less today's results and those queued), and
+	// when the next window opens (the next 00:00 UTC after the last).
+	Windows      int64  `json:"windows,omitempty"`
+	WindowLeft   *int64 `json:"window_left,omitempty"`
+	WindowEndsAt int64  `json:"window_ends_at,omitempty"`
 	// Successor is the standing task the requester named as the next round
 	// (work.successor.set, C391); NextRound, sent only while this task is
 	// not claimable, the first claimable task along that chain, else the
@@ -508,7 +534,7 @@ func invalidStanding(msg string) error {
 }
 
 // WorkStandingRule is a standing create's data, the line its refusals end with.
-const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, each with credits); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), results_max (results accepted or waiting over its life, seats to 10000; default seats), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
+const WorkStandingRule = `A standing task is work.create data seats (1–50) with a reward that has credits, or tiers (1–3 of {"name":"bug","credits":N,"usdc":"0.20"}, each with credits); optional per_agent_day (default 1, at most seats), day_max (default seats, at most 1000), windows (1, 2, 3, 4 or 6 equal parts of the UTC day that day_max and usdc_day_max refill in, unused seats carrying into the day's next window; default 1), results_max (results accepted or waiting over its life, seats to 10000; default seats), per_agent_max (results one agent may send over its life, accepted, waiting or rejected, its linked keys included; 1 to results_max or 10000; default no cap), per_agent_cooldown_days (one result per agent per N days across this task and its earlier rounds, accepted or waiting, its linked keys included; 1 to 90; default off), and usdc_per_agent_day and usdc_day_max (decimal USDC strings, each at least every tier's USDC). No reviewer, reviewer_fee or reject_fee.`
 
 // parseWorkStandingTiers reads data tiers.
 func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
@@ -549,7 +575,7 @@ func parseWorkStandingTiers(raw json.RawMessage) ([]WorkStandingTier, error) {
 
 // workStandingFields are the work.create data fields that make a standing
 // task together with seats: each one needs seats beside it.
-var workStandingFields = []string{"per_agent_day", "day_max", "results_max", "per_agent_max", "per_agent_cooldown_days", "tiers", "usdc_per_agent_day", "usdc_day_max"}
+var workStandingFields = []string{"per_agent_day", "day_max", "windows", "results_max", "per_agent_max", "per_agent_cooldown_days", "tiers", "usdc_per_agent_day", "usdc_day_max"}
 
 // workStandingNeedsSeatsText is the refusal of standing fields sent without
 // seats (C959): it names the ones sent and every field that needs seats.
@@ -610,6 +636,9 @@ func checkWorkStandingData(d *workData, seen map[string]bool) error {
 	if seen["per_agent_cooldown_days"] && (st.PerAgentCooldownDays < 1 || st.PerAgentCooldownDays > WorkStandingCooldownDaysMax) {
 		return invalidStanding(fmt.Sprintf("per_agent_cooldown_days is 1 to %d.", WorkStandingCooldownDaysMax))
 	}
+	if seen["windows"] && !validStandingWindows(st.Windows) {
+		return invalidStanding(standingWindowsRule)
+	}
 	switch {
 	case seen["reward"] && seen["tiers"]:
 		return invalidStanding("Send reward or tiers, not both.")
@@ -666,9 +695,10 @@ func loadWorkStanding(ctx context.Context, tx rowQuerier, id string) (*workStand
 	if err = json.Unmarshal([]byte(tiers), &st.Tiers); err != nil || len(st.Tiers) == 0 {
 		return nil, fmt.Errorf("board: standing task %s has no tiers (%v)", id, err)
 	}
-	if st.PerAgentMax, st.PerAgentCooldownDays, err = standingCreateLimits(ctx, tx, id); err != nil {
+	if st.PerAgentMax, st.PerAgentCooldownDays, st.Windows, err = standingCreateLimits(ctx, tx, id); err != nil {
 		return nil, err
 	}
+	st.Windows = max(st.Windows, 1)
 	// C994: a task created with no cap (before results_max defaulted to
 	// seats) whose requester names its next round takes seats results in
 	// all, as if created with results_max seats: the round stops re-opening
@@ -685,26 +715,28 @@ func loadWorkStanding(ctx context.Context, tx rowQuerier, id string) (*workStand
 	return &st, nil
 }
 
-// standingCreateLimits is per_agent_max (C672) and per_agent_cooldown_days
-// (C830) from a standing task's signed work.create data, each 0 when it set
-// none: the create transition is the record, read by its primary key.
-func standingCreateLimits(ctx context.Context, tx rowQuerier, id string) (perMax, cooldownDays int64, err error) {
+// standingCreateLimits is per_agent_max (C672), per_agent_cooldown_days
+// (C830) and windows (C1170) from a standing task's signed work.create
+// data, each 0 when it set none: the create transition is the record, read
+// by its primary key, so these need no column of their own.
+func standingCreateLimits(ctx context.Context, tx rowQuerier, id string) (perMax, cooldownDays, windows int64, err error) {
 	var payload string
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM work_transitions WHERE work_id=? AND operation='work.create' ORDER BY sequence LIMIT 1`, id).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	var data struct {
 		PerAgentMax          int64 `json:"per_agent_max"`
 		PerAgentCooldownDays int64 `json:"per_agent_cooldown_days"`
+		Windows              int64 `json:"windows"`
 	}
 	if raw, err := workCommandData(payload); err != nil || json.Unmarshal([]byte(raw), &data) != nil {
-		return 0, 0, fmt.Errorf("board: standing task %s has unreadable create data", id)
+		return 0, 0, 0, fmt.Errorf("board: standing task %s has unreadable create data", id)
 	}
-	return data.PerAgentMax, data.PerAgentCooldownDays, nil
+	return data.PerAgentMax, data.PerAgentCooldownDays, data.Windows, nil
 }
 
 // createWorkStanding records a new standing root and holds its credit pool.
@@ -1062,7 +1094,7 @@ func (s *Store) checkStandingSeat(ctx context.Context, tx *sql.Tx, root workRow,
 	}
 	switch {
 	case n.today >= st.dayOpen(now):
-		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, dayMaxWhy(st.DayMax, n.today), dayCause(next, dayNextRelease(st.DayMax, n.today+n.queued, now))))
+		return n, queue(StandingBlockedDayMax, errNoSeat(StandingBlockedDayMax, next, until, now, dayMaxWhy(st.DayMax, st.Windows, n.today), dayCause(next, st.dayNextRelease(n.today+n.queued, now))))
 	case n.waiting >= st.Seats:
 		return n, queue(StandingBlockedSeats, errNoSeat(StandingBlockedSeats, next, until, now, fmt.Sprintf("all %s hold a result waiting for a verdict; an accept or a reject frees one sooner", plural(st.Seats, "seat")), "at the latest, when a waiting result's verdict deadline passes"))
 	case standingPoolFinal(st, n, pool, now, until):
@@ -1147,7 +1179,7 @@ func standingQueueNote(st *workStanding, q *standingQueue, item workRow, room st
 	why := map[string]string{
 		StandingBlockedSeats:  fmt.Sprintf("all %s hold a result waiting for a verdict", plural(st.Seats, "seat")),
 		StandingBlockedPool:   "its credit pool holds no reward for another result",
-		StandingBlockedDayMax: dayMaxWhy(st.DayMax, -1),
+		StandingBlockedDayMax: dayMaxWhy(st.DayMax, st.Windows, -1),
 	}[q.blockedBy]
 	note := fmt.Sprintf("Your result is queued (work_id %s, state queued): no seat is open on this standing task right now (%s). It is held, not lost, and counts in standing.submitted; it opens for the requester's verdict with this same id when a seat opens for it, at the earliest %s (next_open_at), in the order results were queued. Nothing more to send: work.get %s reads queued until then, submitted after. If no seat opens for it by %s it expires.",
 		item.ID, why, time.Unix(q.nextOpenAt, 0).UTC().Format(time.RFC3339), item.ID, time.Unix(item.Deadline, 0).UTC().Format(time.RFC3339))
@@ -1718,12 +1750,20 @@ func dayCause(next, release int64) string {
 
 // dayMaxWhy says a day_max refusal's limit: all of the day's results
 // taken, or (taken below dayMax, or -1 unknown) those released so far,
-// the rest opening through the UTC day (C1046).
-func dayMaxWhy(dayMax, taken int64) string {
+// the rest opening through the UTC day (C1046), or in its windows (C1170).
+func dayMaxWhy(dayMax, windows, taken int64) string {
 	if taken >= dayMax {
 		return fmt.Sprintf("it takes %s a day and has them today (day_max)", plural(dayMax, "result"))
 	}
+	if windows > 1 {
+		return fmt.Sprintf("it takes %s a day, opened in %s, and has taken those open so far (day_max)", plural(dayMax, "result"), standingWindowsText(windows))
+	}
 	return fmt.Sprintf("it takes %s a day, opened evenly through the UTC day, and has taken those open so far (day_max)", plural(dayMax, "result"))
+}
+
+// standingWindowsText names a day's refill windows in words (C1170).
+func standingWindowsText(windows int64) string {
+	return fmt.Sprintf("%d windows of the UTC day (%d hours each, from 00:00 UTC)", windows, 24/windows)
 }
 
 func plural(n int64, word string) string {
@@ -1918,9 +1958,13 @@ func (s *Store) standingAccept(ctx context.Context, tx *sql.Tx, w workRow, d wor
 		capped = fmt.Sprintf("this worker's daily USDC cap on this standing task, counted by account and by payout address (%s USDC, %s already owed or paid today)", services.FormatUSDC(st.USDCPerAgentDay), services.FormatUSDC(mine))
 		resets = usdcCapResets(day)
 	case st.USDCDayMax > 0 && all+want > st.usdcDayOpen(now):
-		capped = fmt.Sprintf("this standing task's daily USDC cap (%s USDC, released evenly through the UTC day: %s by now; %s already owed or paid today)",
-			services.FormatUSDC(st.USDCDayMax), services.FormatUSDC(st.usdcDayOpen(now)), services.FormatUSDC(all))
-		if at := dayNextRelease(st.USDCDayMax, all+want-1, now); at < day+86400 {
+		released := "released evenly through the UTC day"
+		if st.Windows > 1 {
+			released = "released in " + standingWindowsText(st.Windows)
+		}
+		capped = fmt.Sprintf("this standing task's daily USDC cap (%s USDC, %s: %s by now; %s already owed or paid today)",
+			services.FormatUSDC(st.USDCDayMax), released, services.FormatUSDC(st.usdcDayOpen(now)), services.FormatUSDC(all))
+		if at := st.usdcNextRelease(all+want-1, now); at < day+86400 {
 			resets = "More of the day's USDC is released at " + time.Unix(at, 0).UTC().Format(time.RFC3339) + "; a result accepted after that can owe USDC again."
 		} else {
 			resets = usdcCapResets(day)
@@ -2254,6 +2298,10 @@ func projectWorkStandingSeats(ctx context.Context, tx rowQuerier, w workRow, eff
 	if len(st.Tiers) > 0 {
 		p.PerResult = st.Tiers[0].Credits
 	}
+	if st.Windows > 1 {
+		left := max(0, st.windowEnd(now)-n.today-n.queued)
+		p.Windows, p.WindowLeft, p.WindowEndsAt = st.Windows, &left, st.windowEndsAt(now)
+	}
 	if st.maxUSDC() > 0 {
 		p.USDCOwed, p.USDCOwedMax = services.FormatUSDC(n.owedUSDC), services.FormatUSDC(st.owedUSDCMax())
 		p.USDCRoom = services.FormatUSDC(st.usdcRoom(n.usdcToday, n.owedUSDC, now))
@@ -2325,6 +2373,10 @@ func (p *WorkStanding) blockedNote() string {
 	case StandingBlockedResultsUntil:
 		return "takes no new results: its deadline leaves less than the verdict window"
 	case StandingBlockedDayMax:
+		if p.OpenedToday < p.DayMax && p.Windows > 1 {
+			// C1170: the day's results open in its windows.
+			return fmt.Sprintf("today's results open so far taken: %d of %d, the rest open in %s (day_max)", p.OpenedToday, p.DayMax, standingWindowsText(p.Windows))
+		}
 		if p.OpenedToday < p.DayMax {
 			// C1046: the day's results open through the day.
 			return fmt.Sprintf("today's results open so far taken: %d of %d, the rest open through the UTC day (day_max)", p.OpenedToday, p.DayMax)
@@ -2453,7 +2505,7 @@ type WorkYou struct {
 func standingNextOpen(st *workStanding, n standingCounts, rewards, now, until int64) int64 {
 	var at int64
 	if n.today+n.queued >= st.dayOpen(now) {
-		at = dayNextRelease(st.DayMax, n.today+n.queued, now)
+		at = st.dayNextRelease(n.today+n.queued, now)
 	}
 	if st.Seats-n.waiting-n.queued <= 0 || rewards-n.queued < 1 {
 		if n.nextVerdict == 0 {
@@ -2498,12 +2550,115 @@ func dayNextRelease(limit, used, now int64) int64 {
 }
 
 // dayOpen is the results the day has released on this standing task by
-// now (day_max, dayReleased).
+// now (day_max, dayReleased; windowReleased with windows, C1170).
 func (st *workStanding) dayOpen(now int64) int64 {
 	if standingDayWhole {
 		return st.DayMax
 	}
-	return dayReleased(st.DayMax, 1, now)
+	return windowReleased(st.DayMax, st.Windows, now)
+}
+
+// dayNextRelease is when dayOpen first passes used (dayNextRelease, or
+// windowNextRelease with windows).
+func (st *workStanding) dayNextRelease(used, now int64) int64 {
+	return windowNextRelease(st.DayMax, st.Windows, used, now)
+}
+
+// standingWindowsRule is the refusal of a windows value work.create does
+// not take (C1170).
+const standingWindowsRule = "windows is 1, 2, 3, 4 or 6: the equal parts of the UTC day (whole hours) day_max and usdc_day_max refill in."
+
+// validStandingWindows says windows splits the UTC day into equal whole
+// hours, at most WorkStandingWindowsMax of them (C1170).
+func validStandingWindows(windows int64) bool {
+	return windows >= 1 && windows <= WorkStandingWindowsMax && 24%windows == 0
+}
+
+// Refill windows (C1170). A standing task created with windows W splits
+// each UTC day into W equal windows and gives each its share of a daily cap
+// (day_max, usdc_day_max): limit/W each, the remainder one apiece to the
+// earliest windows (5 over 4: 2, 1, 1, 1). What a window leaves untaken
+// carries into the day's next windows, never into the next day: the caps
+// count from 00:00 UTC as before, and the day's totals are unchanged. With
+// W = 1 the one window is the whole day, the rule before C1170
+// (dayReleased, dayNextRelease; usdc_day_max whole from 00:00).
+
+// windowShare is window k's share of limit over windows.
+func windowShare(limit, windows, k int64) int64 {
+	share := limit / windows
+	if k < limit%windows {
+		share++
+	}
+	return share
+}
+
+// windowsShares is the shares of windows 0 to k-1 together: what the day
+// has given out once window k starts.
+func windowsShares(limit, windows, k int64) int64 {
+	return k*(limit/windows) + min(k, limit%windows)
+}
+
+// windowReleased is day_max's open results at now over windows: the
+// earlier windows' shares, and the current window's share opened through
+// it as C1046 opens a whole day's (the first at the window's start, all of
+// it by its end). windows 1 is dayReleased(limit, 1, now) itself.
+func windowReleased(limit, windows, now int64) int64 {
+	if windows <= 1 {
+		return dayReleased(limit, 1, now)
+	}
+	length := 86400 / windows
+	k, e := now%86400/length, now%length
+	open := windowsShares(limit, windows, k)
+	if share := windowShare(limit, windows, k); share > 0 {
+		open += min(share, max(1, (share*e+length-1)/length))
+	}
+	return open
+}
+
+// windowNextRelease is when windowReleased(limit, windows, ...) first
+// passes used, as dayNextRelease is for one window: used past the day's
+// limit (results queued ahead, C1088) carries into later days, a whole
+// day's worth onto each, the rest by that day's windows.
+func windowNextRelease(limit, windows, used, now int64) int64 {
+	if windows <= 1 {
+		return dayNextRelease(limit, used, now)
+	}
+	day := now - now%86400
+	if used >= limit {
+		day += used / limit * 86400
+		return day + windowReleaseAt(limit, windows, used%limit)
+	}
+	return max(now+1, day+windowReleaseAt(limit, windows, used))
+}
+
+// windowReleaseAt is the second of the UTC day at which windowReleased
+// first passes used (below limit): the start of the window that holds the
+// next result when it is that window's first, else when the window's own
+// even release reaches it.
+func windowReleaseAt(limit, windows, used int64) int64 {
+	length := 86400 / windows
+	k := int64(0)
+	for windowsShares(limit, windows, k+1) <= used {
+		k++
+	}
+	j := used - windowsShares(limit, windows, k)
+	if j == 0 {
+		return k * length
+	}
+	return k*length + j*length/windowShare(limit, windows, k) + 1
+}
+
+// windowEnd is what day_max has given out by the end of the current
+// window: its share and every earlier one's (standing.window_left).
+func (st *workStanding) windowEnd(now int64) int64 {
+	return windowsShares(st.DayMax, st.Windows, now%86400/(86400/st.Windows)+1)
+}
+
+// windowEndsAt is when the window after now's opens: the next window's
+// start, or the next 00:00 UTC after the day's last.
+func (st *workStanding) windowEndsAt(now int64) int64 {
+	length := 86400 / st.Windows
+	return now - now%length + length
 }
 
 // standingDayWhole is a test seam: the older suites, whose clock sits at
@@ -2524,8 +2679,34 @@ func OpenStandingDayForTest(t interface{ Cleanup(func()) }) {
 // the whole usdc_day_max from 00:00. It is checked when the requester
 // accepts, so a curve here would turn early accepts into credits-only
 // payouts; day_max already spreads the seats that lead to them (C1046).
+// With windows (C1170) it opens in steps: at each window's start, that
+// window's share whole, with what earlier windows left, and at least the
+// largest tier's USDC from 00:00, so one top-tier accept always fits.
 func (st *workStanding) usdcDayOpen(now int64) int64 {
-	return st.USDCDayMax
+	if st.Windows <= 1 {
+		return st.USDCDayMax
+	}
+	return st.usdcWindowOpen(now % 86400 / (86400 / st.Windows))
+}
+
+// usdcWindowOpen is usdcDayOpen from window k's start to its end.
+func (st *workStanding) usdcWindowOpen(k int64) int64 {
+	return min(st.USDCDayMax, max(st.maxUSDC(), windowsShares(st.USDCDayMax, st.Windows, k+1)))
+}
+
+// usdcNextRelease is when usdcDayOpen first passes used today: a later
+// window's start, else the next 00:00 UTC, when the caps reset.
+func (st *workStanding) usdcNextRelease(used, now int64) int64 {
+	day := now - now%86400
+	if st.Windows > 1 {
+		length := 86400 / st.Windows
+		for k := now%86400/length + 1; k < st.Windows; k++ {
+			if st.usdcWindowOpen(k) > used {
+				return day + k*length
+			}
+		}
+	}
+	return day + 86400
 }
 
 // standingSummary is works.list data standing: the seats of the standing
@@ -2562,6 +2743,7 @@ func StandingResultsURL(id string) string { return "/api/works?standing=" + id }
 func WorkStandingCapabilities() map[string]any {
 	return map[string]any{"field": "work.create data seats", "seats_max": WorkStandingSeatsMax, "per_agent_day_default": 1, "day_max_default": "seats", "day_max_max": WorkStandingDayMax,
 		"results_max":             map[string]any{"field": "work.create data results_max", "min": "seats", "max": WorkStandingResultsMax, "default": "seats (C994; an older task created with no cap takes seats results in all once work.successor.set names its next round)", "counts": "results accepted (paid or USDC owed) and waiting for a verdict; rejected, lapsed and hidden ones do not", "full": "standing.open 0 and standing.full true; a claim is 409 results_max_reached"},
+		"windows":                 map[string]any{"field": "work.create data windows", "values": []int64{1, 2, 3, 4, 6}, "default": 1, "rule": "the UTC day splits into windows equal parts; day_max and usdc_day_max are spread over them as evenly as whole numbers allow, the remainder to the earliest windows (5 over 4: 2, 1, 1, 1); a window's results open through it from its start, its USDC whole at its start (at least the largest tier's from 00:00); what a window leaves carries into the day's next windows, never into the next day; the daily totals, per_agent_day and usdc_per_agent_day are per UTC day as before", "read": "standing.windows, window_left (results the current window still opens, after today's and queued ones) and window_ends_at, sent when windows is above 1; next_open_at and blocked_note say when the next window opens", "set": "at create only"},
 		"per_agent_cooldown_days": map[string]any{"field": "work.create data per_agent_cooldown_days", "min": 1, "max": WorkStandingCooldownDaysMax, "default": "off", "counts": "the agent's results, with its linked keys', submitted in the last N days on this task or an earlier round (tasks whose successor names it, at most " + fmt.Sprint(WorkStandingCooldownRounds) + " back): accepted, waiting or queued; rejected, lapsed and hidden waiting ones do not", "refused": "409 per_agent_cooldown with retry_after and next_open_at; the agent's own read shows blocked_by " + StandingBlockedCooldown},
 		"tiers":                   map[string]any{"field": "work.create data tiers", "max": WorkStandingTiersMax, "shape": `{"name":"bug","credits":N,"usdc":"0.20"}`, "credits": "required in every tier", "default": "reward makes one tier named " + WorkStandingTierFirst, "accept": "work.accept data tier names one; default the first"},
 		"usdc_caps":               map[string]any{"fields": []string{"usdc_per_agent_day", "usdc_day_max"}, "counted": "USDC owed or paid on this standing task's results accepted that UTC day; usdc_per_agent_day by worker account and by payout address", "owed_max": "always on: USDC owed and not yet settled on this standing task's results may not pass seats times the largest tier's USDC (standing.usdc_owed, standing.usdc_owed_max); work.settle lowers it", "over_cap": "the result is still accepted and paid in credits only (reward_usdc void, reason usdc_cap); the acknowledgement says so in ack.note and in next.hints code usdc_cap, with when the cap resets: 00:00 UTC for the daily caps", "checked": "when a result is accepted; none is set aside when a result is sent or queued, so a result queued one day and accepted the next meets that day's caps. standing.usdc_room is the USDC an accept could still owe now under the caps on all results (a worker's own usdc_per_agent_day can leave less); a queued result's ack.note gives it, and a void reward_usdc says why in reason_note"},

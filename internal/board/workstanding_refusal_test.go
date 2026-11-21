@@ -35,7 +35,7 @@ func TestWorkStandingCreateRefusalsExplainSeats(t *testing.T) {
 
 	tiers := []any{map[string]any{"name": "bug", "credits": 300}}
 	msg := failsWith(t, s, standingCreate(s, owner, id, map[string]any{"tiers": tiers, "per_agent_day": 1}, ttl), "invalid_work_data")
-	want := "You sent per_agent_day and tiers without seats. These standing-task fields each need seats (1 to 50, the results paid at once) in the same work data: per_agent_day, day_max, results_max, per_agent_max, per_agent_cooldown_days, tiers, usdc_per_agent_day and usdc_day_max."
+	want := "You sent per_agent_day and tiers without seats. These standing-task fields each need seats (1 to 50, the results paid at once) in the same work data: per_agent_day, day_max, windows, results_max, per_agent_max, per_agent_cooldown_days, tiers, usdc_per_agent_day and usdc_day_max."
 	if !strings.HasPrefix(msg, want) {
 		t.Fatalf("seats refusal %q, want it to start %q", msg, want)
 	}

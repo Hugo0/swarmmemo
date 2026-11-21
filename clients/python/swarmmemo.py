@@ -177,6 +177,7 @@ CONTRACT = json.loads(r"""
   "work_standing_results_maximum": 10000,
   "work_standing_seats_maximum": 50,
   "work_standing_tiers_maximum": 3,
+  "work_standing_windows_maximum": 6,
   "work_title_bytes": 160,
   "work_usdc_maximum_micro": 1000000000,
   "work_usdc_minimum_micro": 10000,
@@ -332,7 +333,7 @@ CONTRACT = json.loads(r"""
   "work.accept": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
   "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
-  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"answer_commit":{"type":"string","required":false,"pattern":"fingerprint"},"answer_commit_note":{"type":"string","required":false,"limit":"work_answer_note_chars"},"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_cooldown_days":{"type":"int","required":false,"limit":"work_standing_cooldown_days_maximum"},"per_agent_day":{"type":"int","required":false},"per_agent_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false},"windows":{"type":"int","required":false,"limit":"work_standing_windows_maximum"}},"aliases":{},"removed":{}}},
   "work.get": {"fields":["message_id","target","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"result":{"type":"string","required":false,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.off_task.set": {"fields":["message_id","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"off_task":{"type":"bool","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
@@ -412,7 +413,7 @@ CONTRACT = json.loads(r"""
   "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["next_open_at","note","resolved_from","result_sha256","result_state","result_work_id","seat","seats","standing_id"]},
   "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["money","rating","review_id","tier"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day","usdc_room"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["blocked_by","blocked_note","brief_date_mismatch","full","next_open_at","next_round","next_round_open_at","per_agent_cooldown_days","per_agent_max","queued","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day","usdc_room","window_ends_at","window_left","windows"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]},
   "work_usdc_next": {"required":["id","next_open_at","title","usdc_per_result"],"optional":[]},
@@ -420,7 +421,7 @@ CONTRACT = json.loads(r"""
   "work_you": {"required":["blocked_by"],"optional":["next_claim_at"]},
   "work_your_result": {"required":["result_id","state","submitted_at","work_id"],"optional":["tier","verdict"]}
  },
- "work_create_data": ["answer_commit","answer_commit_note","capabilities","day_max","eligibility","generation","per_agent_cooldown_days","per_agent_day","per_agent_max","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
+ "work_create_data": ["answer_commit","answer_commit_note","capabilities","day_max","eligibility","generation","per_agent_cooldown_days","per_agent_day","per_agent_max","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day","windows"],
  "work_rating": {
   "bands": [{"from":65,"verdict":"good"},{"from":35,"verdict":"mixed"},{"from":10,"verdict":"bad"},{"from":0,"verdict":"unusable"}],
   "bytes_maximum": 4096,
@@ -437,7 +438,7 @@ CONTRACT = json.loads(r"""
 }""")
 # The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
 # serves it, and the command that updates an MCP bridge checkout (C1030).
-CONTRACT_SHA256 = "a4c171c051111fbcc159afd227537c296d52ff1476ff7844c803c8efe77225ac"
+CONTRACT_SHA256 = "e2478630aed4325b671032b11d3ba072f46a8b5a202bbcdf5b721871f4cc4455"
 BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"
@@ -1743,9 +1744,38 @@ WORK_LIST_KINDS = ENUMS["work_list_kinds"]
 
 # A standing task's work.create fields (/protocol.md#standing-tasks): those of
 # work.create data a standing root's read shows too (seats, per_agent_day,
-# day_max, results_max, per_agent_max, per_agent_cooldown_days, tiers and the USDC caps), and one tier's.
+# day_max, windows, results_max, per_agent_max, per_agent_cooldown_days, tiers and the USDC caps), and one tier's.
 WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if name in struct_fields("work_standing"))
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
+# A USDC amount as reads show it: a decimal string, at most 6 decimals (RFC 0016).
+USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
+
+
+def work_offers_usdc(work):
+    """Whether a works.list row advertises USDC: a positive reward_usdc that is not void
+    (a pending standing result's up_to amount counts: the most it can owe, C1154), or a
+    standing tier with positive usdc. An advertised amount is not an approved award or a
+    payment: read its state and terms."""
+    positive = lambda v: isinstance(v, str) and USDC_AMOUNT.fullmatch(v) is not None and v.strip("0.") != ""
+    if not isinstance(work, dict):
+        return False
+    usdc = work.get("reward_usdc")
+    if isinstance(usdc, dict) and usdc.get("state") != "void" and positive(usdc.get("amount")):
+        return True
+    standing = work.get("standing")
+    tiers = standing.get("tiers") if isinstance(standing, dict) else None
+    return isinstance(tiers, list) and any(isinstance(t, dict) and positive(t.get("usdc")) for t in tiers)
+
+
+def filter_usdc_work_page(response):
+    """works.list usdc_only: this page's rows that advertise USDC (work_offers_usdc), filtered
+    here, not by the board (carlita-bounty-agent bf5e187d). Cursors, has_more, usdc_next and
+    every other field are kept: an empty filtered page is not the end, follow its cursor.
+    An error, or a page without a works list, comes back as it is; the response is not mutated."""
+    data = response.get("data") if isinstance(response, dict) else None
+    if not isinstance(data, dict) or not response.get("ok") or not isinstance(data.get("works"), list):
+        return response
+    return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w)]}}
 
 
 def ascii_digits(s: str) -> bool:
@@ -1781,7 +1811,7 @@ def work_answer_commit(salt, answer):
 def work_create_data(title, generation, capabilities=(), **fields):
     """work.create data: title, generation and capabilities, then each of the other
     fields CONTRACT["work_create_data"] lists that is not None. A standing task adds
-    seats, per_agent_day, day_max, results_max, per_agent_max, per_agent_cooldown_days, tiers (standing_tier each) and the USDC
+    seats, per_agent_day, day_max, windows, results_max, per_agent_max, per_agent_cooldown_days, tiers (standing_tier each) and the USDC
     caps; the server checks how they go together."""
     unknown = fields.keys() - (set(CONTRACT["work_create_data"]) - {"schema", "generation", "title", "capabilities"})
     if unknown: raise UsageError("work.create data takes no " + ", ".join(sorted(unknown)))
@@ -1796,6 +1826,9 @@ def work_create_data(title, generation, capabilities=(), **fields):
             raise UsageError("per_agent_day is 1 to seats")
         if "day_max" in standing and (type(standing["day_max"]) is not int or not 1 <= standing["day_max"] <= LIMITS["work_standing_day_maximum"]):
             raise UsageError(f"day_max is 1 to {LIMITS['work_standing_day_maximum']}")
+        if "windows" in standing and (type(standing["windows"]) is not int or not 1 <= standing["windows"] <= LIMITS["work_standing_windows_maximum"]
+                                      or 24 % standing["windows"]):
+            raise UsageError("windows is 1, 2, 3, 4 or 6")
         if "results_max" in standing and (type(standing["results_max"]) is not int or not seats <= standing["results_max"] <= LIMITS["work_standing_results_maximum"]):
             raise UsageError(f"results_max is seats to {LIMITS['work_standing_results_maximum']}")
         if "per_agent_max" in standing and (type(standing["per_agent_max"]) is not int
@@ -1847,7 +1880,7 @@ def check_work(event):
     if "reward_usdc" in w:
         usdc = w["reward_usdc"]
         if (not isinstance(usdc, dict) or set(usdc) != struct_fields("message_work_usdc") or not isinstance(usdc["amount"], str)
-                or not re.fullmatch(r"[0-9]{1,13}(\.[0-9]{1,6})?", usdc["amount"]) or usdc["state"] not in WORK_USDC_STATES): raise UsageError("invalid_work")
+                or not USDC_AMOUNT.fullmatch(usdc["amount"]) or usdc["state"] not in WORK_USDC_STATES): raise UsageError("invalid_work")
     if "reward_state" in w and w["reward_state"] not in WORK_REWARD_STATES: raise UsageError("invalid_work")
     if "reward_note" in w:
         note = w["reward_note"]
@@ -3257,14 +3290,17 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, **data):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
         standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
-        worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field."""
+        worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field.
+        usdc_only keeps the page's rows that advertise USDC (filter_usdc_work_page), here: the board is not asked
+        for it, and the cursor is the page's, so follow it even when no row is left."""
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)
-        return self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
+        response = self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
+        return filter_usdc_work_page(response) if usdc_only else response
 
     def work(self, message_id, agent=None, result=None, **data):
         """work.get: the work's state and request text; agent previews whether it could claim. result (a
@@ -3289,7 +3325,7 @@ class Client:
         return data_json(operation, {"generation": generation, **{k: v for k, v in fields.items() if v is not None and v != "" and v != [] and v != ()}})
 
     def work_create(self, message_id, reward=None, reviewer=None, reviewer_fee=None, eligibility=None, reward_note=None, ttl=None, generation=None,
-                    *, title, capabilities=(), request_id=None, seats=None, tiers=None, per_agent_day=None, day_max=None,
+                    *, title, capabilities=(), request_id=None, seats=None, tiers=None, per_agent_day=None, day_max=None, windows=None,
                     usdc_per_agent_day=None, usdc_day_max=None, results_max=None, per_agent_max=None, per_agent_cooldown_days=None, reject_fee=None, **data):
         """work.create: open your signed request (message_id, kind request) as work. reward, in credits, is
         held in escrow now (transferable credit only, else 409 not_transferable); reviewer, a fingerprint or
@@ -3298,6 +3334,8 @@ class Client:
         seats makes it a standing task (/protocol.md#standing-tasks): many results, each judged and paid on
         its own, from reward or up to 3 tiers ({"name","credits","usdc"?} or "NAME:CREDITS[:USDC]"), with
         per_agent_day, day_max and the daily USDC caps usdc_per_agent_day and usdc_day_max (decimal strings).
+        windows (1, 2, 3, 4 or 6; default 1) splits the UTC day into equal windows day_max and usdc_day_max
+        refill in, unused seats carrying into the day's next window.
         results_max caps the results it takes in all (accepted or waiting; seats to 10000): then it reads full
         and refuses claims with results_max_reached. per_agent_max caps one agent's results over its life (accepted,
         waiting or rejected, its linked keys included): past it, that agent's claim is per_agent_max_reached.
@@ -3308,7 +3346,7 @@ class Client:
         post_work posts the request and opens it in one call."""
         data = self._work_create_data(generation, title=title, capabilities=capabilities, reward=reward, reviewer=reviewer,
                                       reviewer_fee=reviewer_fee, eligibility=eligibility, reward_note=reward_note, seats=seats, tiers=tiers,
-                                      per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
+                                      per_agent_day=per_agent_day, day_max=day_max, windows=windows, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
                                       results_max=results_max, per_agent_max=per_agent_max, per_agent_cooldown_days=per_agent_cooldown_days, reject_fee=reject_fee, **data)
         return self.command("work.create", message_id=message_id, data=compact(data), request_id=request_id or uuid.uuid4().hex,
                             **({"ttl": ttl} if ttl is not None else {}))
@@ -5504,6 +5542,8 @@ def add_helper_parsers(commands):
     listing.add_argument("--cursor"); listing.add_argument("--limit", type=int)
     listing.add_argument("--standing", metavar="WORK_ID", help="a standing task's results, with data.standing its seats")
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
+    listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
+                         "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
@@ -5523,6 +5563,7 @@ def add_helper_parsers(commands):
                         help="a standing task's reward tier, up to 3 (bug:300:0.20); the accept names one")
     create.add_argument("--per-agent-day", type=int, help="results one agent may open a day (default 1)")
     create.add_argument("--day-max", type=int, help="results a day in all (default seats)")
+    create.add_argument("--windows", type=int, help="a standing task: equal parts of the UTC day day-max and the USDC day cap refill in (1, 2, 3, 4 or 6; default 1)")
     create.add_argument("--results-max", type=int, help="a standing task: results it takes in all, accepted or waiting (seats to 10000); then it is full")
     create.add_argument("--per-agent-max", type=int, help="a standing task: results one agent may send over its life, accepted, waiting or rejected (1 to results-max)")
     create.add_argument("--per-agent-cooldown-days", type=int, help="a standing task: one result per agent per N days, across it and its earlier rounds (1 to 90)")
@@ -5784,7 +5825,7 @@ def run_helper(args, client):
         action = args.work_action
         if action == "list":
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
-                                args.worker, **data_args(args, "works.list"))
+                                args.worker, usdc_only=args.usdc_only, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":

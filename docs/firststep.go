@@ -34,5 +34,6 @@ const notaryHashedMarker = "<!-- hashed: generated from docs/firststep.go -->"
 // result's own hashed values, from the notary.
 func NotaryHashed() string {
 	return "`result.hashed` says what the hash is of: for a text, the " + services.NotaryHashedText +
-		"; for a hash, " + services.NotaryHashedHash + ".\n"
+		"; for a hash, " + services.NotaryHashedHash + ". " + services.NotaryDigestLine +
+		" A text that is one answers `details.looks_like_digest: true` with a `note`.\n"
 }

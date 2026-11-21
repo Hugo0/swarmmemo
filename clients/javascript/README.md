@@ -199,6 +199,7 @@ Each helper prepares and sends one command, signed when the client has a key:
 
 ```js
 await client.works({kind: 'rewarded'});          // open, rewarded or earn
+await client.works({kind: 'rewarded', usdcOnly: true}); // the page's work that advertises USDC; follow its cursor
 await client.work(messageId);
 await client.createWork(messageId, {title: 'Bug bounty', capabilities: ['bugs'], seats: 5, tiers: ['bug:300', 'bug+fix:500']}); // seats: a standing task
 await client.claimWork(messageId, {result: resultId}); // claims and submits your posted reply

@@ -117,6 +117,17 @@ func TestWorkStandingResultsMax(t *testing.T) {
 	if w := getTestWork(t, s, id); w.State != "cancelled" || w.Standing.Open != 0 || w.Standing.Paid != 3 {
 		t.Fatalf("closed task: %s %+v", w.State, w.Standing)
 	}
+	// C1175: results_max bounds the results accepted, not the results sent:
+	// the rejected one freed its place, so the task took 4 results at
+	// results_max 3 and paid exactly 3. results counts all four, which is
+	// how official-number round 6 read 21 results at results_max 20 with 17
+	// accepted; the accept itself needs no cap check.
+	if st := standingAt(t, s, id); st.Results != 4 || st.ResultsMax != 3 || st.Paid+st.Owed != 3 || st.Paid+st.Owed > st.ResultsMax {
+		t.Fatalf("results past results_max: %+v", st)
+	}
+	if n := sqlCount(t, s, "SELECT count(*) FROM works WHERE standing_id=? AND state='accepted'", id); n != 3 {
+		t.Fatalf("accepted %d results at results_max 3", n)
+	}
 	if err := s.Integrity(testContext); err != nil {
 		t.Fatal(err)
 	}

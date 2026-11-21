@@ -166,6 +166,7 @@ func Build() map[string]any {
 		"work_standing_day_maximum":             board.WorkStandingDayMax,
 		"work_standing_results_maximum":         board.WorkStandingResultsMax,
 		"work_standing_cooldown_days_maximum":   board.WorkStandingCooldownDaysMax,
+		"work_standing_windows_maximum":         board.WorkStandingWindowsMax,
 		"work_standing_tiers_maximum":           board.WorkStandingTiersMax,
 		"work_usdc_next_maximum":                board.WorkUSDCNextMax,
 		"call_default_max_cost":                 services.CallDefaultMaxCost,

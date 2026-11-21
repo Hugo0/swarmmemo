@@ -9,7 +9,7 @@ import {spawn, spawnSync} from 'node:child_process';
 import {gzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 import {createECDH, createPrivateKey, createPublicKey, randomBytes, sign, verify} from 'node:crypto';
-import {Client, DelegatedClient, ClientError, CONTRACT, FIELDS, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal, agentSubjectID, workCreateData, workAnswerCommit, standingTier, WORK_STANDING_CREATE, markdownAuto, MARKDOWN_POST_DATA, keccak256, walletAddress, personalSign, loadWalletKey, walletChallengeOK, WALLET_KEY_ENV, dataFor, workRatingPost, USER_AGENT, isLoopbackHost, unb64} from './swarmmemo.mjs';
+import {Client, DelegatedClient, ClientError, CONTRACT, FIELDS, canonical, delegationContext, generateKey, importKey, writeKey, loadKey, conversationRoom, loadSeal, agentSubjectID, workCreateData, workAnswerCommit, standingTier, WORK_STANDING_CREATE, markdownAuto, MARKDOWN_POST_DATA, keccak256, walletAddress, personalSign, loadWalletKey, walletChallengeOK, WALLET_KEY_ENV, dataFor, workRatingPost, USER_AGENT, isLoopbackHost, unb64, filterUSDCWorkPage, workOffersUSDC} from './swarmmemo.mjs';
 // sha256 of "ok\n", the output a C591 verifyPublish case publishes.
 const OK_SHA256 = 'dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22';
 
@@ -571,7 +571,7 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
     if (name === 'tier') (options.tiers ??= []).push(value);
     else options[name] = name.startsWith('usdc') ? value : Number(value);
   }
-  assert.deepEqual([...WORK_STANDING_CREATE], ['day_max', 'per_agent_cooldown_days', 'per_agent_day', 'per_agent_max', 'results_max', 'seats', 'tiers', 'usdc_day_max', 'usdc_per_agent_day']);
+  assert.deepEqual([...WORK_STANDING_CREATE], ['day_max', 'per_agent_cooldown_days', 'per_agent_day', 'per_agent_max', 'results_max', 'seats', 'tiers', 'usdc_day_max', 'usdc_per_agent_day', 'windows']);
   assert.equal(JSON.stringify(workCreateData({title: standing.title, capabilities: standing.capabilities, generation: standing.generation, ...options})), standing.data);
   for (const tier of standing.tiers_refused) assert.throws(() => standingTier(tier), errorCode('invalid_option'), tier); // C331, as Python refuses them
   await signed.createWork(id, {title: standing.title, capabilities: standing.capabilities, generation: standing.generation, ttl: 864000, requestId: 'w-1', ...options});
@@ -584,7 +584,8 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   for (const bad of [{seats: 0, reward: 5}, {dayMax: 3}, {seats: 2, perAgentDay: 3}, {seats: 2, tiers: ['a:1', 'b:1', 'c:1', 'd:1']}, {seats: 2, tiers: ['Bad:1']}, {seats: 2, tiers: ['bug:0']}, {seats: 2, tiers: ['bug']}, {seats: 2, nonsense: 1},
     {seats: 2, resultsMax: 1}, {seats: 2, resultsMax: CONTRACT.limits.work_standing_results_maximum + 1}, {seats: 2, resultsMax: '3'}, {resultsMax: 3},
     {seats: 2, perAgentMax: 0}, {seats: 2, resultsMax: 3, perAgentMax: 4}, {perAgentMax: 1},
-    {seats: 2, perAgentCooldownDays: 0}, {seats: 2, perAgentCooldownDays: CONTRACT.limits.work_standing_cooldown_days_maximum + 1}, {seats: 2, perAgentCooldownDays: -1}, {perAgentCooldownDays: 7}])
+    {seats: 2, perAgentCooldownDays: 0}, {seats: 2, perAgentCooldownDays: CONTRACT.limits.work_standing_cooldown_days_maximum + 1}, {seats: 2, perAgentCooldownDays: -1}, {perAgentCooldownDays: 7},
+    {seats: 2, windows: 0}, {seats: 2, windows: 5}, {seats: 2, windows: CONTRACT.limits.work_standing_windows_maximum + 2}, {seats: 2, windows: '4'}, {windows: 4}])
     assert.throws(() => workCreateData({title: 't', generation: 'g', ...bad}), errorCode('invalid_option'), JSON.stringify(bad));
   assert.equal(requests.length, 0);
   // work.cancel closes a standing task early (C346), signing its reason and the generation.
@@ -954,7 +955,7 @@ const JS_WRAPPERS = {
 // A field a wrapper takes under another option: the options that send it.
 const JS_ARGUMENTS = {
   'work.accept review': () => ({rating: 80}), 'find type': v => ({types: v}),
-  'work.create per_agent_day': v => ({seats: 2, perAgentDay: v}), 'work.create day_max': v => ({seats: 2, dayMax: v}),
+  'work.create per_agent_day': v => ({seats: 2, perAgentDay: v}), 'work.create day_max': v => ({seats: 2, dayMax: v}), 'work.create windows': v => ({seats: 2, windows: v}),
   'work.create results_max': v => ({seats: 2, resultsMax: v}), 'work.create per_agent_max': v => ({seats: 2, perAgentMax: v}), 'work.create per_agent_cooldown_days': v => ({seats: 2, perAgentCooldownDays: v}), 'work.create tiers': v => ({seats: 2, tiers: v}),
   'work.create usdc_per_agent_day': v => ({seats: 2, reward: 5, usdcPerAgentDay: v}), 'work.create usdc_day_max': v => ({seats: 2, reward: 5, usdcDayMax: v}),
   'updates.mark_read all': () => ({all: true}),
@@ -1067,6 +1068,36 @@ test('dataFor checks names, types and enums against the contract; the audit gaps
   assert.deepEqual(data('vouch'), {schema: 1, value: 1, sponsor: false, weight: 20});
   await client.rejectWork(P.message, 3, 'no', {generation: P.generation, checks: FIELD_SAMPLES.checks});
   assert.deepEqual(data('work.reject').checks, FIELD_SAMPLES.checks);
+});
+
+test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (carlita-bounty-agent bf5e187d)', async t => {
+  const works = [
+    {id: 'credit-paid', reward: {amount: 100, state: 'paid'}},
+    {id: 'cash-promised', reward_usdc: {amount: '0.02', state: 'promised'}},
+    {id: 'conditional', standing: {tiers: [{name: 'a', credits: 20}, {name: 'b', credits: 60, usdc: '0.05'}]}},
+    {id: 'cash-void', reward_usdc: {amount: '0.05', state: 'void'}},
+    {id: 'up-to', reward_usdc: {amount: '0.40', up_to: true, state: 'promised'}}, // C1154: a pending standing result
+    {id: 'smallest', reward_usdc: {amount: '0.000001', state: 'payable'}},
+    ...['0', '0.000000', 'NaN', '-1', '1e3', '0.0000001', true, 1, null].map(amount => ({id: 'bad', reward_usdc: {amount}})),
+    {id: 'bad', standing: {tiers: [{usdc: '0.00'}, {usdc: 5}]}}, 'not-a-row',
+  ];
+  const page = {ok: true, data: {works, has_more: true, cursor: 'next-page', usdc_next: [{id: 'later'}]}};
+  const sent = [], original = globalThis.fetch;
+  globalThis.fetch = async (url, {body} = {}) => {
+    if (body) sent.push(JSON.parse(body));
+    return new Response(JSON.stringify(page), {status: 200, headers: {'Content-Type': 'application/json'}});
+  };
+  t.after(() => {globalThis.fetch = original;});
+  const client = new Client({origin: 'https://example.org', anonymous: true});
+  const got = await client.works({kind: 'rewarded', usdcOnly: true});
+  assert.deepEqual(got.data.works.map(w => w.id), ['cash-promised', 'conditional', 'up-to', 'smallest']);
+  assert.deepEqual({...got.data, works: undefined}, {...page.data, works: undefined});
+  // The filter is local: the board gets the same works.list as without the flag.
+  assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
+  assert.equal((await client.works({kind: 'rewarded'})).data.works.length, works.length);
+  const error = {ok: false, error: 'rate_limited'};
+  assert.equal(filterUSDCWorkPage(error), error);
+  assert.equal(workOffersUSDC('x'), false);
 });
 
 test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai 8b49d2b7)', async t => {

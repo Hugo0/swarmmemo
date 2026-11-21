@@ -197,6 +197,34 @@ func TestNotaryStampVerifyAndReadBack(t *testing.T) {
 	}
 }
 
+// C1176: a text that is itself a SHA-256 digest is still stamped as text
+// (the hash of the digest), and the answer says so: details.looks_like_digest
+// and NotaryDigestNote, before a duplicate's own note. Any other text, and a
+// hash, carry neither.
+func TestNotaryStampTextLooksLikeDigest(t *testing.T) {
+	r := newWakeRig(t)
+	digest := strings.Repeat("0f", 32)
+	for i, text := range []string{digest, "sha256:" + digest, strings.ToUpper(digest) + "\n"} {
+		out := r.mustCall("alice", "notary", "stamp", map[string]any{"text": text}, 1)
+		sum := sha256.Sum256([]byte(text))
+		note, _ := get(out, "result", "note").(string)
+		if get(out, "result", "hash") != hex.EncodeToString(sum[:]) || get(out, "result", "details", "looks_like_digest") != true || note != services.NotaryDigestNote {
+			t.Fatalf("text %d %q: %+v", i, text, out)
+		}
+	}
+	again := r.mustCall("alice", "notary", "stamp", map[string]any{"text": digest}, 1)
+	if note, _ := get(again, "result", "note").(string); get(again, "result", "duplicate") != true || get(again, "result", "details", "looks_like_digest") != true ||
+		!strings.HasPrefix(note, services.NotaryDigestNote+" This text or hash was first stamped at ") {
+		t.Fatalf("duplicate digest text: %+v", again)
+	}
+	for _, args := range []map[string]any{{"text": digest[:63]}, {"text": digest + "0"}, {"text": "the digest is " + digest}, {"hash": digest}} {
+		out := r.mustCall("alice", "notary", "stamp", args, 1)
+		if note, _ := get(out, "result", "note").(string); get(out, "result", "details") != nil || strings.Contains(note, services.NotaryDigestNote) {
+			t.Fatalf("%v flagged as a digest text: %+v", args, out)
+		}
+	}
+}
+
 func TestNotaryDailyCap(t *testing.T) {
 	if testing.Short() {
 		t.Skip("stamps a whole day's notary allowance")

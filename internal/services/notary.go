@@ -54,6 +54,25 @@ const (
 	NotaryHashedHash = "the hash as given, not re-hashed"
 )
 
+// A text that is itself a SHA-256 digest (64 hex digits, either case,
+// optionally after "sha256:", surrounding space aside) is stamped as text,
+// so the receipt's hash is the hash of that digest: legitimate, and agents
+// did it by mistake (C1176). The stamp still goes through; its result says
+// so in details.looks_like_digest and NotaryDigestNote. NotaryDigestLine is
+// the same in one line for the method's Line (the MCP tool description and
+// the catalogue) and the /tools/notary page.
+var notaryDigestTextRE = regexp.MustCompile(`^(?:sha256:)?[0-9a-fA-F]{64}$`)
+
+const (
+	NotaryDigestNote = "This text looks like a sha256 digest: to stamp the digest itself, pass it as hash."
+	NotaryDigestLine = "A digest sent as text is hashed again: pass a digest as hash."
+)
+
+// textLooksLikeDigest says whether a stamp's text is a SHA-256 digest.
+func textLooksLikeDigest(text string) bool {
+	return notaryDigestTextRE.MatchString(strings.TrimSpace(text))
+}
+
 // notaryHashRule is the refusal text for a hash argument notaryHashRE refuses.
 const notaryHashRule = "hash must be a SHA-256: 64 lowercase hex digits."
 
@@ -123,7 +142,7 @@ func (*notary) Describe() Descriptor {
 		Mode: Local,
 		Methods: []Method{
 			{Name: "stamp", Write: true, Signed: true, Resource: allowance.Credit, ArgsMax: notaryArgsMax, Price: Price{Base: 1},
-				Line:      "Get a signed receipt for a hash or text; a repeat returns the first. " + NotaryStampAnswer,
+				Line:      "Get a signed receipt for a hash or text; a repeat returns the first. " + NotaryDigestLine + " " + NotaryStampAnswer,
 				Args:      []Arg{{"hash", "string", false, "a lowercase SHA-256 hex digest"}, {"text", "string", false, "or up to " + SizeText(NotaryTextBytes) + " of text, hashed and never stored"}},
 				Example:   json.RawMessage(`{"text":"Plan for YYYY-MM-DD by YOUR_NAME: ship the catalogue."}`),
 				Anonymous: true, AnonymousLabel: "the notary", AnonymousNote: "at most " + strconv.Itoa(NotaryPerAnonymousDay) + " new receipts a day per network",
@@ -351,6 +370,10 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		// = cuts the text short without a word, and this shows it (C750).
 		out["bytes"] = textBytes
 		out["hashed"] = NotaryHashedText
+		if textLooksLikeDigest(StampText(c.Args)) {
+			out["details"] = map[string]any{"looks_like_digest": true}
+			out["note"] = NotaryDigestNote
+		}
 	} else {
 		out["hashed"] = NotaryHashedHash
 	}
@@ -360,7 +383,11 @@ func (n *notary) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		// (conclave-pickle 21bf82f1; kosoyy C552, on the docs' own example).
 		first := time.Unix(r.Time, 0).UTC().Format(time.RFC3339)
 		out["first_stamped_at"] = first
-		out["note"] = "This text or hash was first stamped at " + first + ", so the receipt is that first stamp, kept as the proof. A stamp proves the text existed by then; stamping it again cannot move that time. For a new receipt, stamp a text of your own (add your name, the date or a nonce). result.receipt.hash is the content's SHA-256; call.id is this request."
+		note := "This text or hash was first stamped at " + first + ", so the receipt is that first stamp, kept as the proof. A stamp proves the text existed by then; stamping it again cannot move that time. For a new receipt, stamp a text of your own (add your name, the date or a nonce). result.receipt.hash is the content's SHA-256; call.id is this request."
+		if digest, ok := out["note"].(string); ok {
+			note = digest + " " + note
+		}
+		out["note"] = note
 	}
 	body, _ := json.Marshal(out)
 	return Result{Body: body, Used: used, Public: public}, nil

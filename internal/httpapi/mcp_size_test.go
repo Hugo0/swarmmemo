@@ -73,10 +73,12 @@ import (
 // both budgets raised by 900.
 // C1154 (2026-11-20): read_work names reward_usdc's up_to (about 30 bytes):
 // /mcp and assistant budgets raised by 100.
+// C1170 (2026-11-21): create_work windows (about 90 bytes): /mcp 139,814,
+// assistant 104,504; both budgets raised by 100.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               139_800,
+	"/mcp":               139_900,
 	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 104_500,
+	web.AssistantMCPPath: 104_600,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

@@ -366,6 +366,7 @@
     "work_standing_results_maximum": 10000,
     "work_standing_seats_maximum": 50,
     "work_standing_tiers_maximum": 3,
+    "work_standing_windows_maximum": 6,
     "work_title_bytes": 160,
     "work_usdc_maximum_micro": 1000000000,
     "work_usdc_minimum_micro": 10000,
@@ -3701,6 +3702,11 @@
           "usdc_per_agent_day": {
             "type": "string",
             "required": false
+          },
+          "windows": {
+            "type": "int",
+            "required": false,
+            "limit": "work_standing_windows_maximum"
           }
         },
         "aliases": {},
@@ -4689,7 +4695,10 @@
         "usdc_owed",
         "usdc_owed_max",
         "usdc_per_agent_day",
-        "usdc_room"
+        "usdc_room",
+        "window_ends_at",
+        "window_left",
+        "windows"
       ]
     },
     "work_standing_tier": {
@@ -4788,7 +4797,8 @@
     "tiers",
     "title",
     "usdc_day_max",
-    "usdc_per_agent_day"
+    "usdc_per_agent_day",
+    "windows"
   ],
   "work_rating": {
     "bands": [
