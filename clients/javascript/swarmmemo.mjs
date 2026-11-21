@@ -2133,7 +2133,13 @@ export class Client {
   // standing (a standing task's ID) lists its results, with data.standing its seats.
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
-  async works({kind, room, query, eligibleFor, standing, worker, cursor, limit, usdcOnly, ...data} = {}) {
+  // sinceCursor polls the first page with data.since from the previous response.
+  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, ...data} = {}) {
+    if (present(sinceCursor)) {
+      if (cursor) fail('invalid_option', 'Cursor and sinceCursor are mutually exclusive.');
+      const token = text(sinceCursor);
+      cursor = token.startsWith('since.') ? token : 'since.' + token;
+    }
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
     const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
     return usdcOnly ? filterUSDCWorkPage(response) : response;

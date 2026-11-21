@@ -809,7 +809,10 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		ids[i] = h.ID
 	}
 	vets, _ := toolVets(ctx, x.db, ids...) // a failed read only shows the bundler's flags
-	hits, later := []any{}, []any{}
+	// hits are callable as they are; bought are the hits whose tool id is
+	// not, bought through the vetted catalogue resource at their endpoint
+	// (callable_via); later is the rest.
+	hits, bought, later := []any{}, []any{}, []any{}
 	anyListed := false
 	for _, h := range page.hits {
 		q := f.cachedQuote(h, time.Now())
@@ -836,11 +839,12 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		if byOperator {
 			e["vetted_by"], e["bundler_vetted"] = "operator", h.Vetted
 		}
-		if res := via[h.ID]; res != nil {
+		res := via[h.ID]
+		if res != nil {
 			// C566: the same endpoint is a vetted catalogue resource, bought
-			// with x402 call by its id; vetted stays the tool index's flag.
+			// with x402 call by its id. vetted, callable and why_not stay the
+			// tool id's: a call of the id does what they say (C1193).
 			e["callable_via"] = map[string]any{"method": "call", "resource": res.ID, "note": catalogueViaNote}
-			why = ""
 		}
 		e["callable"] = why == ""
 		if why != "" {
@@ -863,11 +867,15 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		} else if h.SchemaCut {
 			e["input_schema_truncated"] = true
 		}
-		// Callable hits first, in the bundler's order, then the rest: an agent
-		// looking for something it can buy sees those at the top (Skitter 12b515db).
-		if why == "" {
+		// Callable hits first, in the bundler's order, then those bought
+		// through a catalogue resource, then the rest: an agent looking for
+		// something it can buy sees those at the top (Skitter 12b515db).
+		switch {
+		case why == "":
 			hits = append(hits, e)
-		} else {
+		case res != nil:
+			bought = append(bought, e)
+		default:
 			later = append(later, e)
 		}
 	}
@@ -881,7 +889,7 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 	named, matched := x.submittedMatches(s, taken, price)
 	hits = append(append(named, hits...), matched...)
 	callable := len(hits)
-	hits = append(hits, later...)
+	hits = append(append(hits, bought...), later...)
 	out := map[string]any{
 		"hits": hits, "matched": len(hits), "callable": callable, "partial": page.partial, "cached": cached,
 		"tools": x.bundlerSummary(price), "call": bundlerCallNote,
@@ -962,7 +970,7 @@ func (x *x402) submittedMatches(s bundlerSearch, taken map[string]bool, price Pr
 }
 
 // catalogueViaNote says which index each of a hit's flags comes from.
-const catalogueViaNote = "vetted is the tool index's flag; callable counts the catalogue: call this endpoint as service.call x402 call with this resource, not the tool id."
+const catalogueViaNote = "vetted, callable and why_not are the tool id's; the same endpoint is a vetted catalogue resource: buy it as service.call x402 call with this resource, not the tool id."
 
 // catalogueViaFetches bounds the descriptors one search reads to learn a
 // candidate hit's endpoint.

@@ -985,6 +985,20 @@ const JS_NO_WRAPPER = {
   ...Object.fromEntries(['private_read.create', 'private_read.revoke'].map(op => [op, 'private grants use the Python private-inbox helper, not this client'])),
 };
 
+test('works accepts a since token without changing filters or pagination', async t => {
+  const {sent} = recordingFetch(t), client = new Client({origin: 'https://example.org', anonymous: true});
+  const sinceCursor = 'since.' + 'a'.repeat(32) + '.' + 'b'.repeat(22);
+  await client.works({kind: 'rewarded', room: 'bounties', limit: 5, sinceCursor});
+  await client.works({sinceCursor: 'old-token'});
+  await client.works({cursor: 'page-token'});
+  await assert.rejects(client.works({cursor: 'page-token', sinceCursor}), {code: 'invalid_option'});
+  assert.deepEqual(sent, [
+    {operation: 'works.list', room: 'bounties', kind: 'rewarded', cursor: sinceCursor, limit: 5},
+    {operation: 'works.list', cursor: 'since.old-token'},
+    {operation: 'works.list', cursor: 'page-token'},
+  ]);
+});
+
 function recordingFetch(t) {
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {

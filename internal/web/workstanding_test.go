@@ -210,9 +210,8 @@ func TestWorkSSRStandingNextRound(t *testing.T) {
 	}
 }
 
-// C1067: a queued result's page says when it opens from its own work.get
-// next_open_at (the time its claim's ACK gave).
-func TestWorkSSRQueuedResultOpening(t *testing.T) {
+// A standing result's deadline changes meaning when it gets a seat.
+func TestWorkSSRStandingResultDeadline(t *testing.T) {
 	standingID, resultID := strings.Repeat("c", 32), strings.Repeat("f", 32)
 	opens := int64(1788595201)
 	result := board.Work{ID: resultID, Room: "bounties", Title: "Standing bug bounty", State: "queued", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
@@ -230,13 +229,39 @@ func TestWorkSSRQueuedResultOpening(t *testing.T) {
 		}
 		return board.Result{OK: true}, nil
 	}}
-	w := httptest.NewRecorder()
-	Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+resultID, nil))
-	if w.Code != 200 {
-		t.Fatalf("/work/%s: %d", resultID, w.Code)
-	}
-	if want := "at the earliest " + time.Unix(opens, 0).UTC().Format("2006-01-02 15:04 UTC"); !strings.Contains(w.Body.String(), want) {
-		t.Errorf("the queued result's page misses %q", want)
+	date := time.Unix(result.Deadline, 0).UTC().Format("2006-01-02 15:04 UTC")
+	verdict := ". It is its own task, with its own verdict deadline (" + date + ")."
+	for _, tc := range []struct{ state, stored, text string }{
+		{"queued", "open", ". If no seat opens, this result expires in the queue on " + date + "."},
+		{"expired", "open", ". This result expired in the queue on " + date + "."},
+		{"submitted", "submitted", verdict},
+		{"accepted", "accepted", verdict},
+		{"expired", "submitted", verdict},
+		{"review_lapsed", "submitted", verdict},
+		{"cancelled", "cancelled", " · <strong>rejected</strong>."},
+	} {
+		t.Run(tc.state+"_"+tc.stored, func(t *testing.T) {
+			result.State, result.StoredState, result.NextOpenAt = tc.state, tc.stored, 0
+			if tc.state == "queued" {
+				result.NextOpenAt = opens
+			}
+			w := httptest.NewRecorder()
+			Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+resultID, nil))
+			if w.Code != 200 {
+				t.Fatalf("/work/%s: %d", resultID, w.Code)
+			}
+			want := `<p class="standing-result">Result for <a href="/work/` + standingID + `">the standing task</a>` + tc.text + "</p>"
+			if !strings.Contains(w.Body.String(), want) {
+				t.Errorf("missing deadline text %q", tc.text)
+			}
+			// C1067: the earliest opening still comes from the result's own work.get.
+			if tc.state == "queued" {
+				want := "at the earliest " + time.Unix(opens, 0).UTC().Format("2006-01-02 15:04 UTC")
+				if !strings.Contains(w.Body.String(), want) {
+					t.Errorf("the queued result's page misses %q", want)
+				}
+			}
+		})
 	}
 }
 

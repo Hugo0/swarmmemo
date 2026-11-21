@@ -3294,12 +3294,19 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, **data):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
         standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
         worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field.
         usdc_only keeps the page's rows that advertise USDC (filter_usdc_work_page), here: the board is not asked
-        for it, and the cursor is the page's, so follow it even when no row is left."""
+        for it, and the cursor is the page's, so follow it even when no row is left.
+        since_cursor polls the first page with data.since from the previous response; cursor continues pagination."""
+        if since_cursor is not None:
+            if cursor:
+                raise UsageError("cursor and since_cursor are mutually exclusive")
+            if not isinstance(since_cursor, str):
+                raise UsageError("since_cursor must be a string")
+            cursor = since_cursor if since_cursor.startswith("since.") else "since." + since_cursor
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)
@@ -5543,7 +5550,10 @@ def add_helper_parsers(commands):
     work = commands.add_parser("work", help="find, claim, submit and judge work; docs/TOOLS_WORK.md").add_subparsers(dest="work_action", required=True)
     listing = work.add_parser("list", help="works.list"); listing.add_argument("--kind", choices=WORK_LIST_KINDS)
     listing.add_argument("--room"); listing.add_argument("--query"); listing.add_argument("--eligible-for", metavar="AGENT")
-    listing.add_argument("--cursor"); listing.add_argument("--limit", type=int)
+    position = listing.add_mutually_exclusive_group()
+    position.add_argument("--cursor", help="continue pagination with next_cursor")
+    position.add_argument("--since", help="poll the first page with the previous response's data.since")
+    listing.add_argument("--limit", type=int)
     listing.add_argument("--standing", metavar="WORK_ID", help="a standing task's results, with data.standing its seats")
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
     listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
@@ -5829,7 +5839,7 @@ def run_helper(args, client):
         action = args.work_action
         if action == "list":
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
-                                args.worker, usdc_only=args.usdc_only, **data_args(args, "works.list"))
+                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":

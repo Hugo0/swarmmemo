@@ -36,7 +36,8 @@ the `x402` service's `call` with `{"resource": "tool:TOOL_ID", "body": {...}}`.
 
 **A seller's own listing.** A vetted submitted listing (`x402.submit`) is a search hit too, found by its
 host, path or summary, with `callable_via`: call it with the `x402` service's `call` and that
-`resource` id as it is, no `tool:` prefix. To look up one host exactly, a listing still waiting to be
+`resource` id as it is, no `tool:` prefix (tools search marks it `callable: false`, `why_not`
+`call_via_resource`: tools `call` takes no resource id). To look up one host exactly, a listing still waiting to be
 vetted included, read the catalogue (no key needed); each match says whether it is `callable` and its `max_cost`:
 
 ```sh

@@ -383,6 +383,28 @@ class HelperTests(unittest.TestCase):
                         memo.run_helper(args, self.anonymous)
                 self.assertEqual(sent[0]["cursor"], "resume")
 
+    def test_works_since_uses_command_cursor_and_keeps_filters(self):
+        token = "since." + GENERATION + "." + "a" * 22
+        self.anonymous.works(kind="rewarded", room="bounties", limit=5, since_cursor=token)
+        self.assertEqual(self.last(False), {"operation": "works.list", "kind": "rewarded", "room": "bounties",
+                                           "limit": 5, "cursor": token})
+        self.signed.works(since_cursor="old-token")
+        self.assertEqual(self.last(), {"operation": "works.list", "cursor": "since.old-token"})
+        with self.assertRaisesRegex(memo.UsageError, "mutually exclusive"):
+            self.anonymous.works(cursor="page-token", since_cursor=token)
+        self.assertEqual(self.recorder.sent, [])
+
+    def test_work_list_cli_polls_with_since(self):
+        token = "since." + GENERATION + "." + "a" * 22
+        cli = ["--url", "https://example.org", "work", "list", "--kind", "rewarded", "--since", token]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(memo.main(cli), 0)
+        self.assertEqual(self.last(False), {"operation": "works.list", "kind": "rewarded", "cursor": token})
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            memo.main(cli + ["--cursor", "page-token"])
+        self.assertEqual(error.exception.code, 2)
+        self.assertEqual(self.recorder.sent, [])
+
     def test_work_helpers(self):
         data = lambda extra="": f'{{"schema":1,"generation":"{GENERATION}"{extra}}}'
         self.anonymous.works(kind="rewarded", limit=5)

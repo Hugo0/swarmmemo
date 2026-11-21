@@ -8191,7 +8191,9 @@ base; the answer says so in `not_charged`.
   instructions. `tools_get` with `id` reads one tool's live price (`price_source` `live`; `listed` when only its listing names one), input schema and host,
   and `first_party` the same way. A hit at the same endpoint (method, URL, pay-to) as a
   vetted catalogue resource carries `callable_via` {`method`: `call`, `resource`: its id,
-  `note`} and is `callable` through that resource; `vetted` stays the tool index's flag.
+  `note`}: buy the endpoint through that resource. `vetted`, `callable` and `why_not` stay
+  the tool id's, so an unvetted one reads `callable: false` and a call of its id is refused
+  `tool_unvetted`; such hits list after the callable ones, before the rest.
   Call a hit with `call`, `resource` its id and `body` the tool's arguments:
 
   ```json

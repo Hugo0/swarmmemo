@@ -403,16 +403,94 @@ func TestToolsSearchFindsSubmittedResource(t *testing.T) {
 			t.Fatalf("%q: first hit %v", query, first)
 		}
 	}
-	// The unified tools search lists it, kind catalogue, without a tool: example.
+	// The unified tools search lists it, kind catalogue, without a tool:
+	// example. tools call takes no resource id, so the hit says so (C1193):
+	// callable false, why_not naming x402 call with its callable_via
+	// resource, after the callable weather hit.
 	page, raw := h.toolsSearch(`{"query":"agents.samedaydesk.com","kind":"catalogue"}`)
 	list := toolEntries(page)
-	if len(list) == 0 || list[0]["id"] != desk || list[0]["kind"] != "catalogue" || list[0]["callable"] != true || list[0]["callable_via"] == nil || list[0]["example"] != nil {
+	if len(list) != 2 || list[0]["id"] != "tool:"+toolOK || list[0]["callable"] != true {
 		t.Fatalf("tools search by host: %s", raw)
+	}
+	via, _ := list[1]["callable_via"].(map[string]any)
+	if list[1]["id"] != desk || list[1]["kind"] != "catalogue" || list[1]["callable"] != false || list[1]["why_not"] != WhyNotCallVia ||
+		list[1]["vetted"] != true || via["resource"] != desk || via["method"] != "call" || list[1]["example"] != nil {
+		t.Fatalf("tools search, the submitted hit: %s", raw)
+	}
+	if _, err := h.toolsCall(`{"id":"`+desk+`","args":{}}`, creditsFor(20000)); errCode(err) != "invalid_service" || !strings.Contains(err.(*allowance.Err).Message, WhyNotCallVia) {
+		t.Fatalf("tools call of a resource id: %v", err)
 	}
 	// Unvetted, it is found by x402 resources only.
 	s.byID[desk].Vetted = false
 	page, err := h.bundlerRead(testSubject, "tools_search", `{"query":"agents.samedaydesk.com"}`)
 	if err != nil || hitsByID(page)[desk] != nil {
 		t.Fatalf("an unvetted resource: %v %v", page["hits"], err)
+	}
+}
+
+// C1193 (nekoagnt, #bounties a69d38b0): an unvetted tool index hit at the
+// endpoint of a vetted catalogue resource read callable:true without vetted
+// or why_not in tools search, and calling its id was refused tool_unvetted.
+// Every flag now says what a call of the hit's id does: vetted false,
+// callable false, why_not tool_unvetted, in tools search and x402
+// tools_search alike; callable_via still names the resource that buys the
+// endpoint, and such a hit ranks after the callable ones but before the
+// rest.
+func TestToolsSearchCallableAgreesWithCall(t *testing.T) {
+	h, api := newBundlerHarnessWith(t, "", "", []string{"docs"}, Deps{})
+	const inline = "bazaar.humanmirror-fr-api-x402-inline"
+	const res = "humanmirror-fr-api-x402-inline-0000000000000001"
+	api.hits = `[{"id":"` + inline + `","title":"Inline preflight","description":"Inline preflight","payment":{"price_hint":"0.001","pay_to":"` + testPayTo + `"},"unvetted":true,
+  "invocation":{"method":"post","url":"https://humanmirror.fr/api/x402/inline"}},
+ {"id":"` + toolUnvet + `","title":"Unvetted preflight","description":"Unvetted preflight","payment":{"price_hint":"0.001"},"unvetted":true},
+ {"id":"` + toolOK + `","title":"Weather preflight","description":"Weather preflight","payment":{"price_hint":"0.001"}}]`
+	m, _ := h.engine.Registry().Lookup("x402")
+	x := m.(*x402)
+	payTo, _ := ParseEVMAddress(testPayTo)
+	r := &X402Resource{ID: res, URL: "https://humanmirror.fr/api/x402/inline", Method: "POST", Vetted: true, PayTo: payTo, Bundler: X402Bundler, Open: true, MaxAmount: 1000}
+	indexResource(r)
+	x.cat.snap.Store(&x402Snapshot{byID: map[string]*X402Resource{res: r}, open: []*X402Resource{r}, stats: map[string]callStats{}, categories: map[string]int{}})
+	check := func(where string, hit map[string]any) {
+		t.Helper()
+		via, _ := hit["callable_via"].(map[string]any)
+		if hit["vetted"] != false || hit["callable"] != false || hit["why_not"] != "tool_unvetted" || via["resource"] != res || via["method"] != "call" {
+			t.Errorf("%s: %v", where, hit)
+		}
+	}
+	page, err := h.bundlerRead(testSubject, "tools_search", `{"query":"preflight"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("x402 tools_search", hitsByID(page)["tool:"+inline])
+	if page["callable"] != float64(1) {
+		t.Errorf("x402 tools_search callable = %v, want 1", page["callable"])
+	}
+	order := []string{}
+	for _, e := range page["hits"].([]any) {
+		order = append(order, e.(map[string]any)["id"].(string))
+	}
+	if want := []string{"tool:" + toolOK, "tool:" + inline, "tool:" + toolUnvet}; !reflect.DeepEqual(order, want) {
+		t.Errorf("x402 tools_search order %v, want %v", order, want)
+	}
+	unified, raw := h.toolsSearch(`{"query":"preflight","kind":"catalogue"}`)
+	order = order[:0]
+	for _, e := range toolEntries(unified) {
+		order = append(order, e["id"].(string))
+		if e["id"] == "tool:"+inline {
+			check("tools search", e)
+		}
+		if e["id"] == "tool:"+toolOK && (e["vetted"] != true || e["callable"] != true || e["why_not"] != nil) {
+			t.Errorf("tools search, a vetted hit: %v", e)
+		}
+	}
+	if want := []string{"tool:" + toolOK, "tool:" + inline, "tool:" + toolUnvet}; !reflect.DeepEqual(order, want) {
+		t.Errorf("tools search order %v, want %v: %s", order, want, raw)
+	}
+	// The call agrees: the tool id is refused before any payment.
+	if _, err := h.toolsCall(`{"id":"tool:`+inline+`","args":{}}`, creditsFor(20000)); errCode(err) != "tool_unvetted" {
+		t.Fatalf("tools call of the unvetted id: %v", err)
+	}
+	if h.charged() != 0 {
+		t.Fatal("a refused call was charged")
 	}
 }

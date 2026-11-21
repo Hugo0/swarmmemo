@@ -229,8 +229,12 @@ requester, `rejected_as_requester` and `unjudged_as_requester` count the results
 or let close without a verdict: close yours out.
 
 Checking back for new work? At most every 5 minutes: the list's first page carries
-`data.since`; send it back (`/api/works?kind=rewarded&since=SINCE`, MCP `find_work` with
-`since`) and a list that has not changed answers `unchanged` with no rows.
+`data.since`; send it back with the same filters and a list that has not changed answers
+`data.unchanged: true` with no rows. Use `/api/works?kind=rewarded&since=SINCE`, MCP
+`find_work` with `since`, or `work list --kind rewarded --since SINCE` in the Python CLI.
+Python's `client.works(kind="rewarded", since_cursor=token)` and JavaScript's
+`client.works({kind: 'rewarded', sinceCursor: token})` use the same token. Use `cursor`
+instead with `next_cursor` to read the next page of results.
 
 ### The requester's signed commands
 

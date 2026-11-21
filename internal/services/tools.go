@@ -48,6 +48,11 @@ const (
 // ToolsCostLine is the cost rule every surface states.
 const ToolsCostLine = "Every tool has a credit price; the free daily allowance covers it."
 
+// WhyNotCallVia is the why_not of a tools search hit whose id tools call
+// does not take: a submitted catalogue resource, bought with service.call
+// x402 call and the resource its callable_via names (C1193).
+const WhyNotCallVia = "call_via_resource"
+
 // toolsCallNote is how a search hit is called.
 const toolsCallNote = `service.call tools {"schema":1,"method":"call","args":{"id":ID,"args":{...}},"max_cost":N}: args follows the hit's input_schema; max_cost is optional for a swarmmemo: tool (left out, its quote is the ceiling) and required for a tool: id (its price.max_cost or less).`
 
@@ -211,7 +216,7 @@ func (e *Engine) routeTool(data string, toolMaxCost func() int64) (service, rout
 		return "", "", badArg("args must be an object: the tool's arguments, as its input_schema states.")
 	}
 	id := *a.ID
-	unknown := &allowance.Err{Code: "invalid_service", Message: "id names no tool here: tools search lists them (" + ToolIDPrefix + "SERVICE.METHOD or " + BundlerPrefix + "NAME)."}
+	unknown := &allowance.Err{Code: "invalid_service", Message: "id names no tool here: tools search lists them (" + ToolIDPrefix + "SERVICE.METHOD or " + BundlerPrefix + "NAME); a hit with why_not " + WhyNotCallVia + " is bought with service.call x402 call and its callable_via resource."}
 	if rest, ok := strings.CutPrefix(id, ToolIDPrefix); ok {
 		svc, method, _ := strings.Cut(rest, ".")
 		d, m, found := e.cfg.Registry.toolMethod(svc, method)
@@ -429,7 +434,8 @@ func namesCapability(query string, keywords []string) bool {
 }
 
 // catalogueTools maps the paid-API search's answer to search hits: id,
-// title, description, input schema and credit price, and first_party when the
+// title, description, input schema and credit price, vetted, callable and
+// why_not as a call of the id meets them (C1193), and first_party when the
 // bundler sells the tool itself; no listing's upstream, host or payment
 // detail.
 func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
@@ -440,6 +446,7 @@ func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
 			Description string          `json:"description"`
 			Truncated   bool            `json:"description_truncated"`
 			Status      string          `json:"summary_status"`
+			Vetted      *bool           `json:"vetted"`
 			Callable    bool            `json:"callable"`
 			WhyNot      string          `json:"why_not"`
 			FirstParty  bool            `json:"first_party"`
@@ -467,8 +474,17 @@ func catalogueTools(raw json.RawMessage) ([]toolHit, bool) {
 		}
 		entry := map[string]any{"id": h.ID, "kind": "catalogue", "title": h.Title, "description": h.Description, "description_truncated": h.Truncated,
 			"summary_status": h.Status, "price": price, "needs_key": !page.Tools.WithoutKey, "callable": h.Callable, "text_is_untrusted": true}
+		if h.Vetted != nil {
+			entry["vetted"] = *h.Vetted
+		}
 		if h.WhyNot != "" {
 			entry["why_not"] = h.WhyNot
+		}
+		if !IsToolID(h.ID) {
+			// A submitted resource's hit (C1013): tools call takes no
+			// resource id, so the hit's own id is not callable here; it is
+			// bought as its callable_via says (C1193).
+			entry["callable"], entry["why_not"] = false, WhyNotCallVia
 		}
 		if h.FirstParty {
 			entry["first_party"] = true
@@ -732,16 +748,22 @@ func exampleArgs(args []toolArg) map[string]any {
 // keywords the query names, then its own tools that match every word, then
 // the catalogue in its own order, then partial matches; a hit that is not
 // callable (callable false: an unvetted paid API, a tool down here) after
-// every one that is (C885). A stable sort keeps the catalogue's order
-// among equals.
+// every one that is (C885), and one bought through the catalogue resource
+// at its endpoint (callable_via) between the two (C1193). A stable sort
+// keeps the catalogue's order among equals.
 func rankTools(hits []toolHit, limit int) []any {
-	callable := func(h toolHit) bool { c, _ := h.entry["callable"].(bool); return c }
-	slices.SortStableFunc(hits, func(a, b toolHit) int {
-		switch ca, cb := callable(a), callable(b); {
-		case ca && !cb:
-			return -1
-		case cb && !ca:
+	tier := func(h toolHit) int {
+		if c, _ := h.entry["callable"].(bool); c {
+			return 0
+		}
+		if h.entry["callable_via"] != nil {
 			return 1
+		}
+		return 2
+	}
+	slices.SortStableFunc(hits, func(a, b toolHit) int {
+		if ta, tb := tier(a), tier(b); ta != tb {
+			return ta - tb
 		}
 		switch {
 		case a.score > b.score:

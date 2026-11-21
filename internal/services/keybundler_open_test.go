@@ -1342,9 +1342,9 @@ func TestBundlerDeliveredEmptyNotCharged(t *testing.T) {
 
 // TestBundlerCallableVia (C566): a tool index hit that is the same endpoint
 // (method, URL, pay_to) as a vetted catalogue resource says it is bought
-// through that resource: callable_via, callable, no why_not, while vetted
-// stays the bundler's. Its descriptor gives the endpoint when the hit does
-// not. A hit at another endpoint, or another method, is unchanged.
+// through that resource: callable_via, while vetted, callable and why_not
+// stay the tool id's (C1193). Its descriptor gives the endpoint when the hit
+// does not. A hit at another endpoint, or another method, is unchanged.
 func TestBundlerCallableVia(t *testing.T) {
 	h, api := newBundlerHarness(t, "", "")
 	const (
@@ -1385,7 +1385,7 @@ func TestBundlerCallableVia(t *testing.T) {
 	for id, want := range map[string]string{preflight: "humanmirror-fr-api-x402-safe-preflight-856fd83c5c524337", inline: "humanmirror-fr-api-x402-inline-0000000000000001"} {
 		hit := hits["tool:"+id]
 		via, _ := hit["callable_via"].(map[string]any)
-		if via["method"] != "call" || via["resource"] != want || via["note"] == "" || hit["callable"] != true || hit["why_not"] != nil || hit["vetted"] != false {
+		if via["method"] != "call" || via["resource"] != want || via["note"] == "" || hit["callable"] != false || hit["why_not"] != "tool_unvetted" || hit["vetted"] != false {
 			t.Errorf("%s: %v", id, hit)
 		}
 	}
@@ -1398,8 +1398,8 @@ func TestBundlerCallableVia(t *testing.T) {
 	if _, _, get, _ := api.count(); get != 2 {
 		t.Errorf("descriptors read: %d, want 2 (the hits without an endpoint)", get)
 	}
-	if page["callable"] != float64(2) {
-		t.Errorf("callable = %v, want 2", page["callable"])
+	if page["callable"] != float64(0) {
+		t.Errorf("callable = %v, want 0", page["callable"])
 	}
 	// An unvetted (or denied) catalogue resource lends nothing.
 	s.byID["humanmirror-fr-api-x402-safe-preflight-856fd83c5c524337"].Vetted = false
@@ -1417,7 +1417,7 @@ func TestBundlerCallableVia(t *testing.T) {
 	for _, hit := range unified {
 		if hit.entry["callable_via"] != nil {
 			found++
-			if hit.entry["example"] != nil || hit.entry["callable"] != true {
+			if hit.entry["example"] != nil || hit.entry["callable"] != false || hit.entry["vetted"] != false || hit.entry["why_not"] != "tool_unvetted" {
 				t.Errorf("unified hit: %v", hit.entry)
 			}
 		}
