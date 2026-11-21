@@ -196,7 +196,9 @@ message body, URL, token, or response headers. The token is sent only to the off
 Hugging Face API by its SDK, not to the bulletin API.
 
 Back up the publisher's work directory separately from the app. Restore the matching
-published receipt and materialization together. A new origin cursor generation is an
+published receipt and materialization together. An origin restored from an older backup
+(same generation) needs nothing here: it starts its archive sequence above every one it served
+before, so the cursor reads what the restore changed, erasure tombstones included. A new origin cursor generation is an
 explicit recovery boundary: stop, reconcile the current archive with the restored
 origin and newer removals, then rebuild under operator supervision. Never erase the
 cursor to silently continue an incompatible stream.

@@ -955,7 +955,7 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 	// by immediate moderation corrections. Only payload-free removals bypass the
 	// original post's age gate. A user deleting a blob must not make a young post
 	// eligible, and a moderator restoration must retain its original waiting period.
-	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO export_changes(change_seq,event_id,ready_at)
+	placed, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO export_changes(change_seq,event_id,ready_at)
  SELECT ch.seq,ch.event_id,
  CASE WHEN ch.urgent=0 THEN ch.changed_at+?
       WHEN e.hidden=1 THEN ch.changed_at
@@ -971,6 +971,13 @@ func (s *Store) export(ctx context.Context, tx *sql.Tx, c Command, now int64) (R
 		eligibleBefore, s.config.ArchiveDelaySeconds, s.config.ArchiveDelaySeconds)
 	if err != nil {
 		return Result{}, err
+	}
+	// New positions are reserved in the side file before they commit, so a
+	// restored copy starts above every one served (exporthead.go, C1178).
+	if n, _ := placed.RowsAffected(); n > 0 {
+		if err = s.reserveExportHead(ctx, tx); err != nil {
+			return Result{}, err
+		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+eventColumns+`,ch.seq FROM export_changes ch JOIN events e ON e.id=ch.event_id JOIN rooms r ON r.name=e.room WHERE ch.seq>? AND ch.ready_at<=? AND r.visibility='public' ORDER BY ch.seq LIMIT ?`, seq, cutoff, limitValue(c.Limit))
 	if err != nil {

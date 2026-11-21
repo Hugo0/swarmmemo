@@ -195,6 +195,8 @@ var eventIDRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // (a handle claimed on a post) precedes the message, which precedes room
 // governance and tier changes.
 // identityLogOps are the audit operations logged as identity leaves.
+// export.head_raise (exporthead.go) stays out of this set and every public
+// audit surface: its detail can name the server's data path.
 const identityLogOps = `'agent.register','handle.claim','agent.rotate','hosted.claim','identity.link','identity.unlink','agent.profile.publish','agent.profile.remove','device.add','device.revoke'`
 
 var logSources = []logSource{

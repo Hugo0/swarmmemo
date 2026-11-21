@@ -1,5 +1,5 @@
 {
-  "allowlist_sha256": "7031dc82827801c7cbc1c8da4a3271b9f3ac4074b521a9191ae27a23bd4a0a41",
+  "allowlist_sha256": "34b5beb90e1f7fc2423f52ddde06fe49b6d4d57ae5cf0b34c20824cca42f47df",
   "files": [
     {
       "mode": "0644",
@@ -976,8 +976,8 @@
     {
       "mode": "0644",
       "path": "docs/DATASET.md",
-      "sha256": "5eb57d66eb3ec7a9e0b6109258710eec792ead027561e26ef34833fe76f3965e",
-      "size": 13965
+      "sha256": "2d200572a1492e9264e1cb297c75f5e9b18dd04153cd66a559cf03b18edf8904",
+      "size": 14183
     },
     {
       "mode": "0644",
@@ -2037,6 +2037,18 @@
     },
     {
       "mode": "0644",
+      "path": "internal/board/exporthead.go",
+      "sha256": "ef53cfd092425f4180209aa30826be8306ffb104990ca1ac391ef6ef1a625216",
+      "size": 10237
+    },
+    {
+      "mode": "0644",
+      "path": "internal/board/exporthead_test.go",
+      "sha256": "a4a9c4c45c72789269037217fa7631fae118d04703174f8f8871cabbe1857718",
+      "size": 12549
+    },
+    {
+      "mode": "0644",
       "path": "internal/board/features.go",
       "sha256": "d17d8606ae5c4b69042f51f9ba1bc485383eb137f663ca12467810524907f081",
       "size": 13812
@@ -2770,8 +2782,8 @@
     {
       "mode": "0644",
       "path": "internal/board/messages.go",
-      "sha256": "b132860ba4761e0e6e313b682aea21aedfd0dea8279b7feabce8f27fd515854d",
-      "size": 51236
+      "sha256": "912430ac8a2f11fdf39bf83c26f53aad51cf8ad4b42ee578b15a3379255555b8",
+      "size": 51515
     },
     {
       "mode": "0644",
@@ -3934,8 +3946,8 @@
     {
       "mode": "0644",
       "path": "internal/board/store.go",
-      "sha256": "45455dcf86d49818d4d7fbf4343c94200da218557440bea218744898d9100572",
-      "size": 72775
+      "sha256": "9ad461458e7f86d3a9dcb55c406cc602cb7a1a9efc93435e1fc15fd7dc54d6d5",
+      "size": 73140
     },
     {
       "mode": "0644",
@@ -4312,8 +4324,8 @@
     {
       "mode": "0644",
       "path": "internal/board/transparency.go",
-      "sha256": "d00f9ffe7e9b86d9006b45b3d6969114f30ef498ba3cda50ebaa2f504e1cff9d",
-      "size": 91304
+      "sha256": "b9e1069f435bfa9e8e4df33b96329b602b513a5a81bce781453abc3716c9d084",
+      "size": 91442
     },
     {
       "mode": "0644",

@@ -204,6 +204,8 @@ type Store struct {
 	// the account.erase hold tokens' key (eraseowner.go).
 	erasureSide  string
 	eraseHoldKey []byte
+	// C1178: the export head ceiling's side file (exporthead.go).
+	exportHead exportHeadState
 	// Waiting reads (waiting.go): the signal each committed write closes and
 	// the slots updates.get waits take.
 	changes       changeSignal
@@ -703,6 +705,13 @@ func Open(path string, config Config) (*Store, error) {
 	if !ro {
 		s.erasureSide = erasureSidePath(path)
 	}
+	// C1178: a restored copy's export head is raised to the reserved
+	// ceiling before anything positions a row (exporthead.go).
+	if !ro {
+		if err = s.openExportHead(context.Background(), path, config.Operator); err != nil {
+			return fail(err)
+		}
+	}
 	if !ro && !config.Operator {
 		if _, err = s.replayErasures(context.Background()); err != nil {
 			return fail(err)
@@ -813,6 +822,7 @@ func (s *Store) Close() error {
 	if s.readDB != nil {
 		_ = s.readDB.Close()
 	}
+	s.closeExportHead()
 	return s.db.Close()
 }
 func randomID() string {
