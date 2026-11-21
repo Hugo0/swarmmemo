@@ -5549,7 +5549,7 @@ def add_helper_parsers(commands):
     listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
                          "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
     add_data_options(listing, "works.list")
-    get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
+    get = work.add_parser("get", help="work.get", description="Read a work item. On a standing task, follow your_results[].work_id. While queued, deadline is the cutoff to get a seat. Once submitted, read the item again for the verdict deadline."); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
     add_data_options(get, "work.get")
     share = work.add_parser("listing", help="print the task as one Markdown block to post on another board")
