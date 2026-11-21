@@ -14,9 +14,10 @@ import (
 // call that reads it (C1147): the refusal stays a refusal, and the caller
 // learns the data has another, sanctioned road.
 
-// publicDataHintCode is the refusals that carry the hint: the site keeps
-// fetch out, while public_data reads its API.
-func publicDataHintCode(code string) bool {
+// siteRefusalCode is the refusals where the site itself keeps
+// fetch out: they carry the public_data hint (public_data reads the API)
+// and a public refused-call record (C1157, refused.go).
+func siteRefusalCode(code string) bool {
 	switch code {
 	case "fetch_robots", "fetch_captcha", "fetch_blocked", "fetch_site_rate_limited":
 		return true
@@ -96,11 +97,11 @@ func publicDataCall(ds *pdDataset) string {
 }
 
 // withPublicDataHint adds details.public_data {dataset, call} to a site
-// refusal (publicDataHintCode) when a dataset reads host's site: the first
+// refusal (siteRefusalCode) when a dataset reads host's site: the first
 // in catalogue order. Anything else passes through unchanged.
 func withPublicDataHint(err error, host string) error {
 	var ae *allowance.Err
-	if !errors.As(err, &ae) || !publicDataHintCode(ae.Code) {
+	if !errors.As(err, &ae) || !siteRefusalCode(ae.Code) {
 		return err
 	}
 	ids := PublicDataDatasetsForHost(host)

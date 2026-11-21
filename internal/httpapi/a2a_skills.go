@@ -575,7 +575,7 @@ func (s *Server) a2aAnswer(r *http.Request, m *a2aMessageIn, route a2aRoute, v1 
 					reward = strconv.FormatInt(w.Reward.Amount, 10) + " " + w.Reward.Unit + "s"
 				}
 				if w.RewardUSDC != nil {
-					reward = strings.TrimPrefix(reward+" + ", " + ") + w.RewardUSDC.Amount + " USDC"
+					reward = strings.TrimPrefix(reward+" + ", " + ") + w.RewardUSDC.AmountWords()
 				}
 			}
 			link := s.cfg.PublicURL + "/work/" + w.ID

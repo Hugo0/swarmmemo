@@ -40,6 +40,11 @@ func TestWorkStandingQueuedResultOpensOnVerdict(t *testing.T) {
 	if st := standingAt(t, s, id); st.Submitted != 2 || st.Queued != 1 || st.Open != 0 || st.BlockedBy != StandingBlockedSeats || st.NextOpenAt != firstDeadline {
 		t.Fatalf("standing with a queued result: %+v", st.WorkStandingSeats)
 	}
+	// C1156: the results a verdict can judge now are submitted less queued,
+	// the ones waiting_results lists; /work/ID reads the same.
+	if root := getTestWork(t, s, id); root.Standing.AwaitingVerdict() != 1 || len(root.WaitingResults) != 1 || root.WaitingResults[0].WorkID != r1 {
+		t.Fatalf("awaiting a verdict %d, waiting_results %+v", root.Standing.AwaitingVerdict(), root.WaitingResults)
+	}
 	if held := creditIn(t, s, requester, "held"); held != 200 {
 		t.Fatalf("a queued result moved credits: %d held", held)
 	}

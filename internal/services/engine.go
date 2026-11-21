@@ -886,7 +886,13 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 			state = "unknown"
 		}
 		jobState = "failed"
-		if _, err = tx.ExecContext(ctx, "UPDATE service_calls SET state=?, cost=CASE WHEN ?='unknown' THEN max_cost ELSE 0 END, error=?, finished_at=? WHERE id=? AND state='running'", state, state, code, now, callID); err != nil {
+		// A refusal the provider put on record (C1157) keeps its public
+		// record; any other failure keeps none.
+		public := "{}"
+		if state == "failed" {
+			public = refusedPublic(res.Public, code)
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE service_calls SET state=?, cost=CASE WHEN ?='unknown' THEN max_cost ELSE 0 END, error=?, public=?, finished_at=? WHERE id=? AND state='running'", state, state, code, public, now, callID); err != nil {
 			return nil, err
 		}
 	} else {
@@ -920,7 +926,15 @@ func (e *Engine) settle(ctx context.Context, account, callID, jobID string, res 
 	// code alone, so a retry answers without them.
 	var ve, ae *allowance.Err
 	if errors.As(err, &ve) && errors.As(runErr, &ae) && ae.Code == ve.Code {
-		if ae.Details != nil {
+		if id, ok := callIDOf(ve.Details); ok {
+			d := withCallID(ae.Details, id)
+			if pub, _ := ve.Details.(map[string]any)[RefusalPublicKey].(bool); pub {
+				if m, ok := d.(map[string]any); ok {
+					m[RefusalPublicKey] = true
+				}
+			}
+			ve.Details = d
+		} else if ae.Details != nil {
 			ve.Details = ae.Details
 		}
 		ve.PricingURL = ae.PricingURL // the seller's price list (pricing.go)
@@ -945,6 +959,8 @@ type callRow struct {
 	service, method string
 	holdID, body    string
 	errCode         string
+	public          string
+	account         string
 }
 
 // loadCall is a call as stored, with its paid_from: a settled hold's from
@@ -973,11 +989,11 @@ func (e *Engine) loadCall(ctx context.Context, q allowance.Querier, s allowance.
 }
 
 func loadCall(ctx context.Context, q allowance.Querier, account, id string) (callRow, error) {
-	var r callRow
+	r := callRow{account: account}
 	err := q.QueryRowContext(ctx, `SELECT c.id,c.state,c.mode,c.resource,c.max_cost,c.cost,c.prices_version,c.created_at,c.expires_at,c.finished_at,
- c.service,c.method,c.hold_id,c.body,c.error,COALESCE((SELECT max(due_at) FROM service_jobs j WHERE j.call_id=c.id),0)
+ c.service,c.method,c.hold_id,c.body,c.error,c.public,COALESCE((SELECT max(due_at) FROM service_jobs j WHERE j.call_id=c.id),0)
  FROM service_calls c WHERE c.id=? AND c.account=?`, id, account).Scan(&r.rec.ID, &r.rec.State, &r.rec.Mode, &r.rec.Resource, &r.rec.MaxCost, &r.rec.Cost, &r.rec.PricesVersion, &r.rec.CreatedAt, &r.rec.ExpiresAt, &r.rec.FinishedAt,
-		&r.service, &r.method, &r.holdID, &r.body, &r.errCode, &r.rec.DueAt)
+		&r.service, &r.method, &r.holdID, &r.body, &r.errCode, &r.public, &r.rec.DueAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, refusal("call_not_found")
 	}
@@ -1000,9 +1016,31 @@ func (r callRow) data() map[string]any {
 // or for a failed call the refusal it failed with.
 func (r callRow) view() (map[string]any, error) {
 	if r.rec.State == "failed" {
-		return nil, refusal(failureCode(r.errCode))
+		code := failureCode(r.errCode)
+		if rf, ok := refusalOf(r.public); ok && rf.Refused == code {
+			// A refusal on record names its call (C1157): details.call_id,
+			// which its agent cites like any call (service.cite); an unsigned
+			// caller's, which no one can cite, is public at /api/calls/ID
+			// already (details.call_public, for the board's words only).
+			d := withCallID(nil, r.rec.ID).(map[string]any)
+			if strings.HasPrefix(r.account, "anon:") {
+				d[RefusalPublicKey] = true
+			}
+			return nil, &allowance.Err{Code: code, Details: d}
+		}
+		return nil, refusal(code)
 	}
 	return r.data(), nil
+}
+
+// callIDOf is the call_id a refusal's details carry.
+func callIDOf(details any) (string, bool) {
+	d, ok := details.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	id, ok := d["call_id"].(string)
+	return id, ok && id != ""
 }
 
 // failureCode keeps a provider's refusal only when the board knows it.

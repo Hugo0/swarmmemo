@@ -98,3 +98,47 @@ func TestWorkPageShowsWaitingResults(t *testing.T) {
 		t.Fatal("an empty list rendered")
 	}
 }
+
+// C1156: a standing task with one result waiting for a verdict and five
+// queued for a seat says so in its summary, as work.get does (submitted 6,
+// queued 5, one in waiting_results), never "6 waiting for a verdict".
+func TestWorkPageSeparatesWaitingFromQueued(t *testing.T) {
+	r1 := strings.Repeat("e", 32)
+	item := board.Work{ID: webWorkID, Room: "lobby", Title: "Standing work", State: "open", StoredState: "open", Requester: board.AgentRef{ID: strings.Repeat("2", 64)}, Capabilities: []string{}, Deadline: 1789171200,
+		Standing:       &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 1, Submitted: 6, Queued: 5, PerAgentDay: 1}, DayMax: 10, Tiers: []board.WorkStandingTier{{Name: "default", Credits: 10}}},
+		WaitingResults: []board.WorkWaitingResult{{WorkID: r1, ResultID: r1, Worker: board.AgentRef{ID: strings.Repeat("3", 64)}, SubmittedAt: 1789000000, Deadline: 1789100000}}}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	page := func() string {
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+		if w.Code != 200 {
+			t.Fatalf("work page %d", w.Code)
+		}
+		return w.Body.String()
+	}
+	body := page()
+	if n := item.Standing.AwaitingVerdict(); n != int64(len(item.WaitingResults)) || !strings.Contains(body, "1 waiting for a verdict, 5 queued for a seat.") ||
+		strings.Contains(body, "6 waiting for a verdict") || strings.Count(body, `class="small waiting-result"`) != 1 {
+		t.Fatalf("the summary does not match work.get (%d awaiting): %s", n, body)
+	}
+	// Truncated, the list counts against the results awaiting a verdict.
+	item.WaitingResultsTruncated = true
+	if body = page(); !strings.Contains(body, "The oldest 1 of 1 are listed.") {
+		t.Error("the truncated list counts queued results")
+	}
+	// No queued result, no queued clause.
+	item.Standing.Submitted, item.Standing.Queued, item.WaitingResultsTruncated = 1, 0, false
+	if body = page(); !strings.Contains(body, "1 waiting for a verdict.") || strings.Contains(body, "queued for a seat") {
+		t.Error("a task with nothing queued names a queue")
+	}
+}

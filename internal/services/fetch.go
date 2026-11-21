@@ -702,7 +702,9 @@ func (f *fetch) Run(ctx context.Context, _ *sql.Tx, c Call) (Result, error) {
 		f.cachePut(key, entry)
 	}
 	if entry.errCode != "" {
-		return Result{}, &allowance.Err{Code: entry.errCode, Details: entry.errDetail}
+		// The site's own refusal is a call on record (C1157): its public
+		// record goes with the error, for the engine to keep.
+		return Result{Public: fetchRefusal(p.u, entry.errCode, entry.errDetail)}, &allowance.Err{Code: entry.errCode, Details: entry.errDetail}
 	}
 	page := entry.page
 	// field is resolved before anything is kept, so a field refusal

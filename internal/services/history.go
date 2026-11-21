@@ -368,6 +368,10 @@ func notaryEntry(id, service, hash string, at, cost, now int64) map[string]any {
 
 func (e *Engine) callEntry(id, service, method, state, resource string, cost, at int64, body, public string, now int64) map[string]any {
 	out := historyBase(id, service+"."+method, state, resource, at, cost, now)
+	if state == "failed" {
+		refusedEntry(out, public) // a refusal on record (C1157)
+		return out
+	}
 	p, ok := e.cfg.Registry.providers[service].(Historian)
 	if !ok || state != "done" {
 		return out

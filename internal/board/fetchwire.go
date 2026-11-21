@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 
 	"swarmmemo/internal/allowance"
@@ -87,9 +88,44 @@ func fetchPublicData(details any) (string, map[string]any) {
 		map[string]any{"public_data": map[string]any{"dataset": ds, "call": call}}
 }
 
+// fetchRefusalOnRecord is the sentence and details.call_id of a site's
+// refusal the board keeps on record (C1157): the refused call's id, which
+// its agent cites with service.cite to make the record public at
+// /api/calls/ID, like any call; an unsigned caller's record, which no one
+// can cite, is public already (details.call_public from services, never
+// sent). Without one (a refusal from before C1157) both are empty.
+func fetchRefusalOnRecord(details any) (string, string) {
+	d, _ := details.(map[string]any)
+	id, _ := d["call_id"].(string)
+	if !services.HistoryIDValid(id) || len(id) != 32 {
+		return "", ""
+	}
+	if public, _ := d[services.RefusalPublicKey].(bool); public {
+		return "The refusal is on record as call " + id + " (details.call_id), public at " + CitedPath + id + " (a call without a key names no one): cite that URL to show the page was tried.", id
+	}
+	return "The refusal is on record as call " + id + " (details.call_id), yours alone until you cite it. To make it public at " + CitedPath + id + ", cite it: service.cite with target " + id + ` and data {"schema":1,"public":true} (Cite in Tool history on the web).`, id
+}
+
+// withRefusalRecord adds details.call_id and its sentence to a site refusal
+// e, beside whatever details it carries.
+func withRefusalRecord(e *Error, details any) *Error {
+	sentence, id := fetchRefusalOnRecord(details)
+	if id == "" {
+		return e
+	}
+	e.Message += " " + sentence
+	d := map[string]any{"call_id": id}
+	if old, ok := e.Details.(map[string]any); ok {
+		maps.Copy(d, old)
+	}
+	e.Details = d
+	return e
+}
+
 // fetchSiteRefused is fetch_blocked, fetch_captcha or
 // fetch_site_rate_limited, naming the public_data dataset that reads the
-// site when the run recorded one (details.public_data).
+// site when the run recorded one (details.public_data) and the refused call
+// on record (details.call_id, C1157).
 func fetchSiteRefused(code string, details any) error {
 	hint, d := fetchPublicData(details)
 	var e *Error
@@ -107,7 +143,7 @@ func fetchSiteRefused(code string, details any) error {
 		e.Message += " " + hint
 		e.Details = d
 	}
-	return e
+	return withRefusalRecord(e, details)
 }
 
 // fetchRobots is fetch_robots, naming the robots.txt line that matched
@@ -134,10 +170,17 @@ func fetchRobots(details any) error {
 		msg = "The site's robots.txt answered " + strconv.Itoa(status) + ", a server error, so SwarmMemoFetch treats every page on the host as disallowed (RFC 9309) and did not request this one; retry later, once the site recovers."
 	}
 	if hint != "" {
-		return &Error{Status: 403, Code: "fetch_robots", Message: msg + " " + hint + " Nothing was charged.", Details: hd}
+		msg += " " + hint
+	} else {
+		msg += " If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead."
 	}
-	msg += " If it is a public_data source, stamp the raw_sha256 in that item's sources[] with notary instead."
-	return problem(403, "fetch_robots", msg+" Nothing was charged.")
+	e := &Error{Status: 403, Code: "fetch_robots", Message: msg}
+	if hd != nil {
+		e.Details = hd
+	}
+	e = withRefusalRecord(e, details)
+	e.Message += " Nothing was charged."
+	return e
 }
 
 // fetchUnsupportedType is fetch_unsupported_type, naming the media type

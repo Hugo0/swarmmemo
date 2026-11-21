@@ -218,9 +218,21 @@ func citeAnswer(id string, at int64, changed bool) map[string]any {
 	return out
 }
 
+// refusedOnRecord reports whether row is a refused call kept on record
+// (services' refused.go, C1157).
+func refusedOnRecord(row services.HistoryRow) bool {
+	return !row.Notary && row.Entry["state"] == services.HistoryStateRefused
+}
+
+// refusedNote is a refused call's public page note (C1157).
+const refusedNote = "A fetch the site refused (error: robots.txt, a bot challenge, 401/403 or 429), kept on record so the attempt can be cited: where (no query string), why and when. Nothing was charged."
+
 // CitedCall is GET /api/calls/ID: a cited call's entry (target, hash, size
-// and time, never the content) with who made it. ok is false for an id that
-// names no cited call: never cited, uncited, or not a call at all.
+// and time, never the content) with who made it. A refused fetch's record
+// (C1157: where, why and when) follows the same rule; an unsigned caller's,
+// which no one can cite, is public from the start and names no one. ok is
+// false for an id that names neither: never cited, uncited, or not a call at
+// all.
 func (s *Store) CitedCall(ctx context.Context, id string) (map[string]any, bool, error) {
 	e := s.services.engine
 	if e == nil || strings.HasPrefix(id, services.HistoryNotaryPrefix) || !services.HistoryIDValid(id) {
@@ -228,8 +240,14 @@ func (s *Store) CitedCall(ctx context.Context, id string) (map[string]any, bool,
 	}
 	now := s.now().Unix()
 	row, ok, err := e.HistoryByID(ctx, s.db, id, now)
-	if err != nil || !ok || strings.HasPrefix(row.Account, "anon:") {
+	if err != nil || !ok {
 		return nil, false, err
+	}
+	if strings.HasPrefix(row.Account, "anon:") {
+		if refusedOnRecord(row) {
+			return anonymousRefusedCall(row), true, nil
+		}
+		return nil, false, nil
 	}
 	if err = citeMarks(ctx, s.db, []services.HistoryRow{row}); err != nil {
 		return nil, false, err
@@ -243,10 +261,25 @@ func (s *Store) CitedCall(ctx context.Context, id string) (map[string]any, bool,
 	}
 	out := map[string]any{"schema": 1, "call": row.Entry, "agent": map[string]any{"fingerprint": row.Account, "handle": handle},
 		"note": "A tool call its agent cited: what it was about, its hash and when, never the text or values. The agent can uncite it."}
+	if refusedOnRecord(row) {
+		out["note"] = refusedNote + " Its agent cited it and can uncite it."
+	}
 	if row.Entry["stale"] == true {
 		out["stale_note"] = services.HistoryStaleNote
 	}
 	return out, true, nil
+}
+
+// anonymousRefusedCall is an unsigned caller's refused fetch, public from
+// the start (no one can cite it): its entry, naming no one (the daily
+// pseudonym stays private).
+func anonymousRefusedCall(row services.HistoryRow) map[string]any {
+	row.Entry["cited"], row.Entry["url"] = true, CitedPath+row.ID
+	out := map[string]any{"schema": 1, "call": row.Entry, "agent": map[string]any{"fingerprint": "", "handle": "", "anonymous": true}, "note": refusedNote}
+	if row.Entry["stale"] == true {
+		out["stale_note"] = services.HistoryStaleNote
+	}
+	return out
 }
 
 // EraseToolHistory is owner erasure for tool history: the account's stored

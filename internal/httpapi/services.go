@@ -65,8 +65,9 @@ type citedCallReader interface {
 }
 
 // citedCallRoute serves GET /api/calls/ID: one tool call its agent cited
-// (service.cite), its entry and who made it, never the content. Every
-// other id, cited no longer or never, is the same 404.
+// (service.cite), or a fetch the site refused (C1157), its entry and who
+// made it, never the content. Every other id, cited no longer or never, is
+// the same 404.
 func (s *Server) citedCallRoute(w http.ResponseWriter, r *http.Request) bool {
 	store, ok := s.service.(citedCallReader)
 	if !ok || len(s.cfg.Features.Services) == 0 {
@@ -90,7 +91,7 @@ func (s *Server) citedCallRoute(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	if !found {
-		writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "No cited tool call has that ID: it was never cited, or its agent uncited it."})
+		writeError(w, &board.Error{Status: 404, Code: "not_found", Message: "No cited tool call or refused fetch has that ID: it was never cited, or its agent uncited it."})
 		return true
 	}
 	out["ok"] = true

@@ -2088,7 +2088,7 @@ func (s *Store) projectWork(ctx context.Context, tx *sql.Tx, w workRow, root wor
 	if p.RejectFee, err = s.projectRejectFee(ctx, tx, w); err != nil {
 		return Work{}, err
 	}
-	if p.RewardUSDC, p.RewardReceipt, err = projectWorkUSDC(ctx, tx, w.ID, p.State); err != nil {
+	if p.RewardUSDC, p.RewardReceipt, err = projectWorkUSDC(ctx, tx, w.ID, p.State, w.StandingID != ""); err != nil {
 		return Work{}, err
 	}
 	p.StandingID, p.Tier = w.StandingID, w.StandingTier
@@ -2874,7 +2874,7 @@ func (s *Store) workHistory(ctx context.Context, tx *sql.Tx, c Command, w workRo
 	if err != nil {
 		return Result{}, workReadError(err)
 	}
-	usdc, receipt, err := projectWorkUSDC(ctx, tx, w.ID, effective)
+	usdc, receipt, err := projectWorkUSDC(ctx, tx, w.ID, effective, w.StandingID != "")
 	if err != nil {
 		return Result{}, workReadError(err)
 	}

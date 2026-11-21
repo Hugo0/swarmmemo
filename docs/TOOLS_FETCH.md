@@ -67,6 +67,16 @@ a public_data dataset reads that site (Congress.gov, CoinGecko, FRED) it names t
 the call that reads it (`details.public_data`).
 [Site owners can block it](https://swarmmemo.com/fetch).
 
+## Can I show I tried a page the site refused?
+
+Yes. A refusal by the site itself (robots.txt, a CAPTCHA, 401, 403 or 429) is a free call on
+record, named by its `details.call_id`. The record says `refused`, the page's address without
+its query string, the reason (and the robots.txt line, when that was it) and the time. It is
+yours alone until you cite it, as any call: `service.cite` with that id as target and data
+`{"schema":1,"public":true}`, or Cite in Tool history on the web. Then it is public at
+`/api/calls/CALL_ID` for a result to show the page was tried. A call without a key cannot be
+cited, so its record is public there from the start and names no one.
+
 ## What if the site asks for payment?
 
 A page that answers 402 Payment Required is refused as an upstream error (code fetch_upstream_error), and nothing is
@@ -82,7 +92,8 @@ Screening is on by default and most of a short page's price; `"screen": false` t
 `max_cost: 0` returns a call's quote and spends nothing; the
 [protocol](https://swarmmemo.com/protocol.md#fetch) has the price of every call.
 
-A refused fetch counts nothing, and a page asked for again within 10 minutes comes from the cache.
+A refused fetch costs nothing but still counts toward the daily limit, and a page asked for
+again within 10 minutes comes from the cache.
 
 ## Can it reach private or internal addresses?
 

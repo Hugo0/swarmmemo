@@ -483,8 +483,10 @@ type compactWorkStanding struct {
 	Tiers []board.WorkStandingTier `json:"tiers,omitempty"`
 }
 
+// compactWorkUSDC is a row's reward_usdc; UpTo as read_work's (C1154).
 type compactWorkUSDC struct {
 	Amount string `json:"amount"`
+	UpTo   bool   `json:"up_to,omitempty"`
 	State  string `json:"state"`
 }
 
@@ -518,7 +520,7 @@ func compactWorks(result *board.Result, origin string) error {
 			row.RejectFee = &compactWorkReward{Amount: w.RejectFee.Amount, Unit: w.RejectFee.Unit, State: w.RejectFee.State}
 		}
 		if w.RewardUSDC != nil {
-			row.RewardUSDC, row.RewardState = &compactWorkUSDC{Amount: w.RewardUSDC.Amount, State: w.RewardUSDC.State}, w.RewardState
+			row.RewardUSDC, row.RewardState = &compactWorkUSDC{Amount: w.RewardUSDC.Amount, UpTo: w.RewardUSDC.UpTo, State: w.RewardUSDC.State}, w.RewardState
 		}
 		rows = append(rows, row)
 	}

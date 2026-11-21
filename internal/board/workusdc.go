@@ -75,9 +75,13 @@ func (s *Store) WorkUSDCEnabled() bool { return s.config.WorkUSDC != nil }
 // owed to PayTo), paid (a verified settlement) or void (no accept: nothing
 // is owed). A void one names why: Reason, its code, and ReasonNote the same
 // in plain words (USDCVoidWords), so the worker reads it on work.get as the
-// page shows it (C1127).
+// page shows it (C1127). UpTo, sent only when true, marks Amount as the most
+// it can owe, not a promise of that amount: a standing task's result before
+// its verdict, promised at the top tier's USDC; the accept sets the accepted
+// tier's amount, or voids it (C1154).
 type WorkRewardUSDC struct {
 	Amount      string `json:"amount"`
+	UpTo        bool   `json:"up_to,omitempty"`
 	Units       int64  `json:"units"`
 	Unit        string `json:"unit"`
 	Network     string `json:"network"`
@@ -95,6 +99,15 @@ type WorkRewardUSDC struct {
 	SettledAt   int64  `json:"settled_at,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	ReasonNote  string `json:"reason_note,omitempty"`
+}
+
+// AmountWords is the amount as pages say it: "0.1 USDC", or "up to 0.1
+// USDC" while UpTo (C1154).
+func (u *WorkRewardUSDC) AmountWords() string {
+	if u.UpTo {
+		return "up to " + u.Amount + " USDC"
+	}
+	return u.Amount + " USDC"
 }
 
 type usdcRow struct {
@@ -736,7 +749,8 @@ func workHasUSDC(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
 // projectWorkUSDC is a work's USDC reward as reads show it, or nil; a
 // promise on work past its deadline unaccepted reads void before the
 // sweeper records it. The receipt, when stamped, is returned beside it.
-func projectWorkUSDC(ctx context.Context, tx *sql.Tx, id, effective string) (*WorkRewardUSDC, *WorkRewardReceipt, error) {
+// On a standing task's result (result true) a promise reads up_to (C1154).
+func projectWorkUSDC(ctx context.Context, tx *sql.Tx, id, effective string, result bool) (*WorkRewardUSDC, *WorkRewardReceipt, error) {
 	r, err := loadWorkUSDC(ctx, tx, id)
 	if err != nil || r == nil {
 		return nil, nil, err
@@ -749,6 +763,7 @@ func projectWorkUSDC(ctx context.Context, tx *sql.Tx, id, effective string) (*Wo
 	if p.State == "void" {
 		p.ReasonNote = USDCVoidWords(p.Reason)
 	}
+	p.UpTo = result && p.State == "promised"
 	var receipt *WorkRewardReceipt
 	if r.ReceiptHash != "" {
 		receipt = &WorkRewardReceipt{Statement: r.Statement, Hash: r.ReceiptHash, Notary: "/api/notary/" + r.ReceiptHash}

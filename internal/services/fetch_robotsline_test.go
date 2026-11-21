@@ -154,7 +154,8 @@ func TestFetchRefusalNamesPublicData(t *testing.T) {
 		if ds, _ := hint(refused("http://api.coingecko.com"+c.path, c.code)); ds != "crypto_spot_price" {
 			t.Fatalf("%s: no hint", c.code)
 		}
-		if d := refused("http://site.test"+c.path, c.code); d != nil {
+		// Only the refused call on record (C1157), no hint.
+		if d := refused("http://site.test"+c.path, c.code); len(d) != 1 || d["call_id"] == nil {
 			t.Fatalf("unrelated %s: %#v", c.code, d)
 		}
 	}

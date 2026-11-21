@@ -197,7 +197,7 @@ func workListingReward(item board.Work) string {
 			parts = append(parts, creditAmount(item.Reward.Amount))
 		}
 		if item.RewardUSDC != nil {
-			parts = append(parts, item.RewardUSDC.Amount+" USDC")
+			parts = append(parts, item.RewardUSDC.AmountWords())
 		}
 	}
 	text := strings.Join(parts, " + ")

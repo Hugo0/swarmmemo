@@ -317,6 +317,8 @@
       if (c.digest) { const hash = node('code', '', String(c.digest).slice(0, 12)); hash.dataset.copy = c.digest; hash.dataset.copyLabel = 'Copy hash'; hash.title = c.digest; what.append(' ', hash); }
       what.append(' · ', timeElement(c.at, 'small muted'));
       if (c.stale) what.append(node('span', 'small muted', ' · older than ' + staleDays + ' days: it may have changed since'));
+      // A fetch the site refused is on record; Cite makes it public (C1157).
+      if (c.state === 'refused') what.append(node('span', 'small muted', ' · refused by the site, on record'));
       row.append(what);
       if (c.cited && c.url) row.append(' ', link('quiet-link', 'public link', c.url));
       if (!String(c.call_id).startsWith('notary:')) {

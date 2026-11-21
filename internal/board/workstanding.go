@@ -196,7 +196,8 @@ func (st *workStanding) maxUSDC() int64 {
 // carry this struct.
 // Open is the seats a result can take now; Submitted the results waiting for
 // a verdict, queued ones included; Queued, sent when there are any, those
-// queued for a seat (C661); Owed the accepted results whose USDC is not yet settled; Paid
+// queued for a seat (C661), so AwaitingVerdict is the ones a verdict can
+// judge now (waiting_results, C1156); Owed the accepted results whose USDC is not yet settled; Paid
 // the other accepted results; PerAgentDay the results one agent may open a
 // day; PerAgentMax, sent when set, the results one agent may send over the
 // task's life (C672); PerAgentCooldownDays, sent when set, the days an
@@ -244,6 +245,11 @@ const (
 	StandingBlockedPerAgentMax  = "per_agent_max"
 	StandingBlockedCooldown     = "per_agent_cooldown"
 )
+
+// AwaitingVerdict is the results a verdict can judge now, the ones
+// waiting_results lists: submitted less those still queued for a seat. The
+// page reads it from the same fields work.get serves (C1156).
+func (s WorkStandingSeats) AwaitingVerdict() int64 { return s.Submitted - s.Queued }
 
 // WorkStandingBlockedBy is every standing.blocked_by, for the docs and
 // /capabilities.
@@ -2097,8 +2103,8 @@ type WorkWaitingResult struct {
 }
 
 // WorkWaitingResultsMax bounds Work.WaitingResults, oldest first;
-// waiting_results_truncated says when more wait (standing.submitted counts
-// them all). WorkWaitingIDsInRefusal is how many the refusal of a verdict
+// waiting_results_truncated says when more wait (standing.submitted less
+// standing.queued counts them all, AwaitingVerdict). WorkWaitingIDsInRefusal is how many the refusal of a verdict
 // sent with the standing task's id names.
 const (
 	WorkWaitingResultsMax   = 50

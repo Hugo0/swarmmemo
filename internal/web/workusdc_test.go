@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -92,5 +93,46 @@ func TestWorkSSRUSDCVoidReason(t *testing.T) {
 	want := "void: " + board.USDCVoidWords(board.WorkUSDCCapReason) + " (reason <code>usdc_cap</code>). No USDC is owed for it."
 	if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, want) {
 		t.Fatalf("work page %d misses %q", w.Code, want)
+	}
+}
+
+// C1154: a standing task's result before its verdict is promised at the top
+// tier's USDC, the most it can owe, so its page says "up to" (up_to on
+// work.get); once accepted it shows the accepted tier's amount.
+func TestWorkSSRStandingResultUSDCUpTo(t *testing.T) {
+	standingID := strings.Repeat("c", 32)
+	item := board.Work{ID: webWorkID, Room: "bounties", Title: "Standing bug bounty", State: "submitted", StoredState: "submitted", Requester: board.AgentRef{ID: strings.Repeat("2", 64)},
+		Reward: &board.WorkReward{Amount: 500, Unit: "credit", State: "held"}, Capabilities: []string{}, Deadline: 1789171200, RewardState: "held", StandingID: standingID,
+		RewardUSDC: &board.WorkRewardUSDC{Amount: "0.4", Unit: "usdc", Network: "eip155:8453", State: "promised", UpTo: true}}
+	s := &testService{execute: func(c board.Command) (board.Result, error) {
+		switch c.Operation {
+		case "room.get":
+			return board.Result{OK: true, Room: &board.Room{Name: c.Room, Visibility: "public"}}, nil
+		case "work.get":
+			return board.Result{OK: true, Data: map[string]any{"work": item}}, nil
+		case "work.history":
+			return board.Result{OK: true, Data: map[string]any{"work_id": webWorkID, "transitions": []board.WorkTransition{}}}, nil
+		}
+		return board.Result{OK: true}, nil
+	}}
+	page := func() string {
+		w := httptest.NewRecorder()
+		Handler(s).ServeHTTP(w, httptest.NewRequest("GET", "/work/"+webWorkID, nil))
+		if w.Code != 200 {
+			t.Fatalf("/work/%s: %d", webWorkID, w.Code)
+		}
+		return html.UnescapeString(w.Body.String())
+	}
+	body := page()
+	for _, want := range []string{"Reward 500 credits (held) + up to 0.4 USDC (promised) · submitted", "Reward held. Up to 0.4 USDC on eip155:8453: promised, owed to the worker on accept at the accepted tier's amount"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("pending result misses %q", want)
+		}
+	}
+	item.State, item.StoredState, item.Tier, item.RewardState = "accepted", "accepted", "bug", "payable"
+	item.Reward.Amount, item.Reward.State = 300, "paid"
+	item.RewardUSDC = &board.WorkRewardUSDC{Amount: "0.2", Unit: "usdc", Network: "eip155:8453", State: "payable", PayTo: "0x00000000000000000000000000000000000000Aa"}
+	if body = page(); !strings.Contains(body, "+ 0.2 USDC (payable) · accepted") || !strings.Contains(body, "Reward payable. 0.2 USDC on eip155:8453: owed to") || strings.Contains(strings.ToLower(body), "up to 0.") {
+		t.Errorf("accepted result does not show the accepted tier's amount")
 	}
 }

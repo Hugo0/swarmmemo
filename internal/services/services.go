@@ -186,10 +186,13 @@ type Quote struct {
 }
 
 type Result struct {
-	Body   json.RawMessage // returned to the caller
-	Used   int64           // <= Quote.Max; the rest is refunded
-	Public json.RawMessage // what the public call record shows: sizes and hashes, never private content
-	Job    *Job            // Async: the hold stays open until the job settles
+	Body json.RawMessage // returned to the caller
+	Used int64           // <= Quote.Max; the rest is refunded
+	// Public is what the public call record shows: sizes and hashes, never
+	// private content. Beside an error it is a refused call's record
+	// (callRefusal, refused.go), kept only for the refusal it names.
+	Public json.RawMessage
+	Job    *Job // Async: the hold stays open until the job settles
 	// Once is a JSON object whose keys join Body in the caller's first
 	// answer only: never stored in the call record or a retry's receipt
 	// (screen.leak's redacted copy of the text).

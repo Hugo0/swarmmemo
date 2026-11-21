@@ -383,8 +383,13 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	fails(t, s, bare, "payout_address_required")
 	r1, c1 := standingClaim(t, s, w1, id, map[string]any{"payout_address": usdcPayee})
 	run(t, s, c1)
-	if w := getTestWork(t, s, r1); w.RewardUSDC == nil || w.RewardUSDC.State != "promised" || w.RewardUSDC.Amount != "0.4" || !strings.EqualFold(w.RewardUSDC.PayTo, usdcPayee) {
+	// C1154: before its verdict a result's USDC is the top tier's, the
+	// most it can owe: up_to, on work.get and work.history alike.
+	if w := getTestWork(t, s, r1); w.RewardUSDC == nil || w.RewardUSDC.State != "promised" || w.RewardUSDC.Amount != "0.4" || !w.RewardUSDC.UpTo || !strings.EqualFold(w.RewardUSDC.PayTo, usdcPayee) {
 		t.Fatalf("promised: %+v", w.RewardUSDC)
+	}
+	if u, _ := run(t, s, Command{Operation: "work.history", MessageID: r1}).Data["reward_usdc"].(*WorkRewardUSDC); u == nil || !u.UpTo || u.AmountWords() != "up to 0.4 USDC" {
+		t.Fatalf("history reward_usdc: %+v", u)
 	}
 	r2, c2 := standingClaim(t, s, w2, id, map[string]any{"payout_address": usdcOther})
 	run(t, s, c2)
@@ -393,7 +398,7 @@ func TestWorkStandingTiersAndUSDCCaps(t *testing.T) {
 	if owedRes := run(t, s, workWith(s, owner, Command{Operation: "work.accept", MessageID: r1, Amount: 1}, map[string]any{"tier": "bug+fix"})); owedRes.Next != nil && len(owedRes.Next.Hints) > 0 {
 		t.Fatalf("an accept that owes USDC has hints: %+v", owedRes.Next.Hints)
 	}
-	if w := getTestWork(t, s, r1); w.Tier != "bug+fix" || w.Reward.Amount != 500 || w.RewardUSDC.State != "payable" || w.RewardUSDC.Amount != "0.4" {
+	if w := getTestWork(t, s, r1); w.Tier != "bug+fix" || w.Reward.Amount != 500 || w.RewardUSDC.State != "payable" || w.RewardUSDC.Amount != "0.4" || w.RewardUSDC.UpTo || w.RewardUSDC.AmountWords() != "0.4 USDC" {
 		t.Fatalf("bug+fix: %+v %+v", w.Reward, w.RewardUSDC)
 	}
 	if got := creditIn(t, s, keyID(w1), "remaining"); got != 500 {
