@@ -239,7 +239,8 @@ class HelperTests(unittest.TestCase):
                     saved = json.loads(path.read_text())
                     self.assertEqual(saved, self.recorder.sent[-1][1])
                     self.assertEqual(self.shown(saved)["operation"], operation)
-                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    if os.name == "posix":
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                     original = path.read_bytes()
                     self.recorder.sent.clear()
                     with self.assertRaises(FileExistsError):
@@ -266,7 +267,8 @@ class HelperTests(unittest.TestCase):
                     saved = json.loads(path.read_text())
                     self.assertEqual(saved, self.recorder.sent[-1][1])
                     self.assertEqual(json.loads(self.shown(saved)["data"])["reviewer"], AGENT)
-                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    if os.name == "posix":
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                     self.recorder.sent.clear()
                     with self.assertRaises(FileExistsError):
                         invoke(client, reviewer)
@@ -328,7 +330,8 @@ class HelperTests(unittest.TestCase):
             next(pages)
             self.assertEqual(self.last()["cursor"], "explicit1")
             self.assertEqual(memo.read_private(path, {})["cursor"], "explicit1")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             pages.close()
 
     def test_cli_memory_list_sends_after(self):
@@ -644,7 +647,8 @@ class HelperTests(unittest.TestCase):
             self.assertFalse(path.exists())  # saved once the page is handled, never before
             next(pages)
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c1"})
-            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
             self.assertEqual(self.last(), {"operation": "updates.get", "target": self.me, "cursor": "c1", "data": '{"schema":1,"wait":20}'})
             pages.close()
             resumed = self.signed.follow_updates(path)
@@ -938,7 +942,8 @@ class EmbedSetupTests(unittest.TestCase):
     def test_first_run_owns_room_posts_signed_and_prints_snippet(self):
         code, out, _ = self.full()
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
         me = hashlib.sha256(memo.public_bytes(memo.load_key(self.key))).hexdigest()
         self.assertIn(f"created {self.key} (mode 600), fingerprint {me}", out)
         self.assertEqual(self.board.operations(), ["agent.get", "agent.register", "room.get", "room.create", "messages.list",
@@ -1337,7 +1342,8 @@ class WritePrivateStaging(unittest.TestCase):
             memo.write_private(path, {"cursor": "c2"})
             self.assertEqual(other.read_text(), "my notes")
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c2"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(sorted(p.name for p in Path(folder).iterdir()), ["cursor.json", "cursor.tmp"])
 
     def test_a_failed_replace_keeps_the_old_state_and_cleans_up(self):
@@ -1385,7 +1391,8 @@ class WritePrivateSymlinkedFolder(unittest.TestCase):
             path = Path(root) / "state" / "cursor.json"
             memo.write_private(path, {"cursor": "c1"})
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c1"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual([p.name for p in path.parent.iterdir()], ["cursor.json"])
 
 
