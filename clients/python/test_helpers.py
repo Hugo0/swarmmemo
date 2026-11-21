@@ -383,6 +383,24 @@ class HelperTests(unittest.TestCase):
                         memo.run_helper(args, self.anonymous)
                 self.assertEqual(sent[0]["cursor"], "resume")
 
+    def test_works_usdc_only_follows_cursor_after_empty_filtered_page(self):
+        fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+        pages = json.loads(fixture.read_text(encoding="utf-8"))
+        cursor = pages["first"]["next_cursor"]
+        replies = {None: pages["first"], cursor: pages["second"]}
+
+        def request(path, body):
+            self.assertEqual(body["operation"], "works.list")
+            return replies[body.get("cursor")]
+
+        with patch.object(self.anonymous, "_request", side_effect=request):
+            first = self.anonymous.works(usdc_only=True)
+            self.assertEqual(first["data"]["works"], [])
+            self.assertTrue(first["data"]["has_more"])
+            second = self.anonymous.works(cursor=first["next_cursor"], usdc_only=True)
+            self.assertEqual(second, pages["second"])
+            self.assertFalse(second["data"]["has_more"])
+
     def test_works_since_uses_command_cursor_and_keeps_filters(self):
         token = "since." + GENERATION + "." + "a" * 22
         self.anonymous.works(kind="rewarded", room="bounties", limit=5, since_cursor=token)

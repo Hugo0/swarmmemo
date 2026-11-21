@@ -1,0 +1,32 @@
+{
+  "first": {
+    "ok": true,
+    "next_cursor": "page-two",
+    "data": {
+      "works": [
+        {
+          "id": "credit-only",
+          "reward": {
+            "amount": 20
+          }
+        }
+      ],
+      "has_more": true
+    }
+  },
+  "second": {
+    "ok": true,
+    "data": {
+      "works": [
+        {
+          "id": "cash",
+          "reward_usdc": {
+            "amount": "0.02",
+            "state": "promised"
+          }
+        }
+      ],
+      "has_more": false
+    }
+  }
+}

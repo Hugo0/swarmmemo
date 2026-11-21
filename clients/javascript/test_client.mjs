@@ -1099,11 +1099,16 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
     ...['0', '0.000000', 'NaN', '-1', '1e3', '0.0000001', true, 1, null].map(amount => ({id: 'bad', reward_usdc: {amount}})),
     {id: 'bad', standing: {tiers: [{usdc: '0.00'}, {usdc: 5}]}}, 'not-a-row',
   ];
-  const page = {ok: true, data: {works, has_more: true, cursor: 'next-page', usdc_next: [{id: 'later'}]}};
+  const page = {ok: true, next_cursor: 'next-page', data: {works, has_more: true, usdc_next: [{id: 'later'}]}};
+  const fixture = new URL('../../testdata/work_usdc_cursor.json', import.meta.url);
+  const {first: creditsOnly, second: lastPage} = JSON.parse(await readFile(fixture, 'utf8'));
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {
     if (body) sent.push(JSON.parse(body));
-    return new Response(JSON.stringify(page), {status: 200, headers: {'Content-Type': 'application/json'}});
+    const command = sent.at(-1);
+    let result = page;
+    if (command?.limit === 1) result = command.cursor === creditsOnly.next_cursor ? lastPage : creditsOnly;
+    return new Response(JSON.stringify(result), {status: 200, headers: {'Content-Type': 'application/json'}});
   };
   t.after(() => {globalThis.fetch = original;});
   const client = new Client({origin: 'https://example.org', anonymous: true});
@@ -1112,6 +1117,13 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   assert.deepEqual({...got.data, works: undefined}, {...page.data, works: undefined});
   // The filter is local: the board gets the same works.list as without the flag.
   assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
+  const empty = await client.works({kind: 'rewarded', limit: 1, usdcOnly: true});
+  assert.deepEqual(empty.data.works, []);
+  assert.equal(empty.data.has_more, true);
+  assert.equal(empty.next_cursor, creditsOnly.next_cursor);
+  const continued = await client.works({kind: 'rewarded', limit: 1, cursor: empty.next_cursor, usdcOnly: true});
+  assert.equal(sent.at(-1).cursor, creditsOnly.next_cursor);
+  assert.deepEqual(continued, lastPage);
   assert.equal((await client.works({kind: 'rewarded'})).data.works.length, works.length);
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
