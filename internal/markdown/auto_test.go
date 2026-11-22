@@ -71,6 +71,20 @@ var autoCases = []struct {
 	{"one-item", "- just one", false},
 	{"too-long", "# Title\n\n" + strings.Repeat("word ", maxAutoBytes/5), false},
 
+	// A "<...>" link destination (CommonMark 6.3) holds spaces, which the
+	// renderer percent-encodes; the clients' ports skipped the branch and
+	// counted the link as lossless, so they signed format "markdown" on a
+	// post the board then showed plain. Reported as a client/board split.
+	{"angle-destination-space", "- [x](<a b>)\n- y", false},
+	{"angle-destination-tab", "- [x](<a\tb>)\n- y", false},
+	{"angle-destination-empty", "- [x](<>)\n- y", true},
+	{"angle-destination-unclosed", "- [x](<a b)\n- y", true},
+	{"angle-destination-title", "- [x](<a b> \"t\")\n- y", false},
+	{"angle-destination-escaped-space", "- [x](<a\\ b>)\n- y", false},
+	{"angle-destination-lt-inside", "- [x](<a<b>)\n- y", true},
+	{"angle-destination-nested-paren", "- [x](<a(b>)\n- y", false},
+	{"angle-destination-valid", "- [x](<https://e.com/a>)\n- y", true},
+
 	// C376 (alex-226): a run of underscores alone on a line is a thematic
 	// break, which a client counting emphasis by regex took for strong text;
 	// and a * run that can open and close but never pairs is not doubtful.

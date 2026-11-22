@@ -947,9 +947,34 @@ function mdMatchBrackets(s) { // matchBrackets
   return pairs;
 }
 
+function mdAngleDestination(s, i) { // angleDestination: ['<...>' content, next] or null
+  // A '<...>' destination (CommonMark 6.3) starting after the '<': any
+  // characters but a line break or an unescaped '<' or '>'. Spaces in it are
+  // percent-encoded, as the board's renderer does (internal/markdown
+  // angleDestination), so the URL goes through mdSafeURL like any other.
+  const n = s.length, start = i;
+  let escaped = false;
+  while (i < n && i - start <= MD_MAX_URL_BYTES) {
+    const c = s[i];
+    if (c === '\\' && i + 1 < n && MD_PUNCT.includes(s[i + 1])) { i++; escaped = true; }
+    else if (c === '>') {
+      let dest = s.slice(start, i);
+      if (escaped) dest = mdUnescapePunct(dest);
+      return [dest.replaceAll(' ', '%20'), i + 1];
+    } else if (c === '<' || c === '\n') return null;
+    i++;
+  }
+  return null;
+}
+
 function mdDestination(s, i) { // destination: [dest, next] or null
   const n = s.length;
   while (i < n && (s[i] === ' ' || s[i] === '\t')) i++;
+  if (i < n && s[i] === '<') {
+    const angled = mdAngleDestination(s, i + 1);
+    if (angled === null) return null;
+    return mdDestinationTail(s, angled[0], angled[1]);
+  }
   const start = i;
   let depth = 0, escaped = false, used = 0;
   while (i < n && used <= MD_MAX_URL_BYTES) {
@@ -963,11 +988,24 @@ function mdDestination(s, i) { // destination: [dest, next] or null
   }
   let dest = s.slice(start, i);
   if (escaped) dest = mdUnescapePunct(dest);
+  return mdDestinationTail(s, dest, i);
+}
+
+function mdDestinationTail(s, dest, i) { // destinationTail: the title and closing ')' after i
+  const n = s.length, start = i;
   while (i < n && (s[i] === ' ' || s[i] === '\t' || s[i] === '\n')) i++;
-  if (i < n && (s[i] === '"' || s[i] === "'")) {
-    const k = s.slice(i + 1, i + 1 + MD_MAX_URL_BYTES).indexOf(s[i]);
-    if (k < 0 || mdBlen(s.slice(i + 1, i + 1 + k)) >= MD_MAX_URL_BYTES) return null;
-    i += k + 2;
+  if (i < n && (s[i] === '"' || s[i] === "'" || s[i] === '(')) {
+    if (i === start) return null; // a title must be separated from the destination by whitespace
+    const close = s[i] === '(' ? ')' : s[i];
+    const limit = Math.min(n, i + 1 + MD_MAX_URL_BYTES);
+    let j = i + 1;
+    while (j < limit && s[j] !== close) {
+      if (close === ')' && s[j] === '(') return null;
+      if (s[j] === '\\' && j + 1 < limit && MD_PUNCT.includes(s[j + 1])) j++;
+      j++;
+    }
+    if (j >= limit) return null;
+    i = j + 1;
     while (i < n && (s[i] === ' ' || s[i] === '\t')) i++;
   }
   if (i >= n || s[i] !== ')' || dest === '') return null;

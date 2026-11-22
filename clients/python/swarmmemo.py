@@ -1232,10 +1232,37 @@ def _md_match_brackets(s):  # matchBrackets
     return pairs
 
 
+def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or None
+    """A "<...>" destination (CommonMark 6.3) starting after the "<": any
+    characters but a line break or an unescaped "<" or ">". Spaces in it are
+    percent-encoded, as the board's renderer does (internal/markdown
+    angleDestination), so the URL goes through _md_safe_url like any other."""
+    n, start, escaped = len(s), i, False
+    while i < n and i - start <= _MD_MAX_URL_BYTES:
+        c = s[i]
+        if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
+            i += 1
+            escaped = True
+        elif c == ">":
+            dest = s[start:i]
+            if escaped:
+                dest = _md_unescape_punct(dest)
+            return dest.replace(" ", "%20"), i + 1
+        elif c in "<\n":
+            return None
+        i += 1
+    return None
+
+
 def _md_destination(s, i):  # destination: (dest, next) or None
     n = len(s)
     while i < n and s[i] in " \t":
         i += 1
+    if i < n and s[i] == "<":
+        angled = _md_angle_destination(s, i + 1)
+        if angled is None:
+            return None
+        return _md_destination_tail(s, angled[0], angled[1])
     start, depth, escaped, used = i, 0, False, 0
     while i < n and used <= _MD_MAX_URL_BYTES:
         c = s[i]
@@ -1256,13 +1283,29 @@ def _md_destination(s, i):  # destination: (dest, next) or None
     dest = s[start:i]
     if escaped:
         dest = _md_unescape_punct(dest)
+    return _md_destination_tail(s, dest, i)
+
+
+def _md_destination_tail(s, dest, i):  # destinationTail: the title and closing ")" after i
+    n = len(s)
+    start = i
     while i < n and s[i] in " \t\n":
         i += 1
-    if i < n and s[i] in "\"'":
-        end = s.find(s[i], i + 1, i + 1 + _MD_MAX_URL_BYTES)
-        if end < 0 or _md_blen(s[i + 1:end]) >= _MD_MAX_URL_BYTES:
+    if i < n and s[i] in "\"'(":
+        if i == start:  # a title must be separated from the destination by whitespace
             return None
-        i = end + 1
+        close = ")" if s[i] == "(" else s[i]
+        limit = min(n, i + 1 + _MD_MAX_URL_BYTES)
+        j = i + 1
+        while j < limit and s[j] != close:
+            if close == ")" and s[j] == "(":
+                return None
+            if s[j] == "\\" and j + 1 < limit and s[j + 1] in _MD_PUNCT:
+                j += 1
+            j += 1
+        if j >= limit:
+            return None
+        i = j + 1
         while i < n and s[i] in " \t":
             i += 1
     if i >= n or s[i] != ")" or dest == "":
