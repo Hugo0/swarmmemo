@@ -31,6 +31,9 @@ FIELD_SAMPLES = {
     "payout_address": "0x" + "ab" * 20,
     "review": {"subject": "site:https://example.org/", "verdict": "good"},
     "work": {"schema": 1, "generation": "e" * 32, "title": "x1", "capabilities": ["review"]},
+    # A USDC amount is the board's decimal (services.ParseUSDC), not any string:
+    # the default "x1" sample would be a request the board refuses.
+    "usdc_per_agent_day": "0.10", "usdc_day_max": "0.10",
 }
 DATA_OPERATIONS = sorted(name for name, op in memo.CONTRACT["operations"].items() if op.get("data") is not None)
 
@@ -159,8 +162,10 @@ ARGUMENTS = {
     ("work.create", "per_agent_cooldown_days"): lambda v: {"seats": 2, "per_agent_cooldown_days": v},
     ("work.create", "windows"): lambda v: {"seats": 2, "windows": v},
     ("work.create", "tiers"): lambda v: {"seats": 2, "tiers": v},
-    ("work.create", "usdc_per_agent_day"): lambda v: {"seats": 2, "reward": 5, "usdc_per_agent_day": v},
-    ("work.create", "usdc_day_max"): lambda v: {"seats": 2, "reward": 5, "usdc_day_max": v},
+    # A USDC cap needs a tier that pays USDC (parseWorkStanding, C1170): the board
+    # refuses a cap beside a credits-only reward, so the sample reward pays USDC.
+    ("work.create", "usdc_per_agent_day"): lambda v: {"seats": 2, "reward": {"credits": 5, "usdc": v}, "usdc_per_agent_day": v},
+    ("work.create", "usdc_day_max"): lambda v: {"seats": 2, "reward": {"credits": 5, "usdc": v}, "usdc_day_max": v},
     ("work.create", "reviewer_fee"): lambda v: {"reviewer": AGENT, "reviewer_fee": v},
 }
 # Operations no Client method wraps. Each is sent, every field of it, with
@@ -353,8 +358,8 @@ CLI_ARGUMENTS = {
     ("work.create", "per_agent_max"): ["--seats", "2", "--per-agent-max", "2"],
     ("work.create", "per_agent_cooldown_days"): ["--seats", "2", "--per-agent-cooldown-days", "2"],
     ("work.create", "windows"): ["--seats", "2", "--windows", "4"],
-    ("work.create", "usdc_per_agent_day"): ["--seats", "2", "--reward", "5", "--usdc-per-agent-day", "0.10"],
-    ("work.create", "usdc_day_max"): ["--seats", "2", "--reward", "5", "--usdc-day-max", "0.10"],
+    ("work.create", "usdc_per_agent_day"): ["--seats", "2", "--tier", "bug:5:0.10", "--usdc-per-agent-day", "0.10"],
+    ("work.create", "usdc_day_max"): ["--seats", "2", "--tier", "bug:5:0.10", "--usdc-day-max", "0.10"],
     ("work.create", "reviewer_fee"): ["--reviewer", AGENT, "--reviewer-fee", "2"],
     ("work.accept", "review"): ["--rating", "80"],
     ("work.reviewer.set", "reviewer"): None, ("work.successor.set", "successor"): None, ("work.reveal", "answer"): None, ("work.reveal", "salt"): None, ("work.settle", "tx_hash"): None, ("work.promise", "amount_usdc"): None,

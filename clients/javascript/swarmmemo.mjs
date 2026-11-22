@@ -1794,8 +1794,41 @@ export function standingTier(value) {
   if (typeof value.name !== 'string' || !new RegExp(CONTRACT.patterns.standing_tier).test(value.name)) fail('invalid_option', 'A tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit.');
   if (!Number.isSafeInteger(value.credits) || value.credits < 0 || value.credits > CONTRACT.limits.work_reward_maximum) fail('invalid_option', 'A tier’s credits are whole, 0 or more.');
   if (value.credits === 0 && value.usdc !== undefined) fail('invalid_option', 'A tier with credits 0 (accepted, unpaid) has no usdc.');
-  if (value.usdc !== undefined && typeof value.usdc !== 'string') fail('invalid_option', 'A tier’s usdc is a decimal string, e.g. 0.20.');
+  if (value.usdc !== undefined) {
+    // The board reads a tier's usdc with services.ParseUSDC and refuses anything
+    // that is not a canonical decimal in the reward range, so a tier this client
+    // accepts but the board cannot read costs a signed request and a rejected task.
+    if (typeof value.usdc !== 'string') fail('invalid_option', 'A tier’s usdc is a decimal string, e.g. 0.20.');
+    workUSDCAmount(value.usdc, 'A tier’s usdc');
+  }
   return {name: value.name, credits: value.credits, ...(value.usdc !== undefined ? {usdc: value.usdc} : {})};
+}
+// services.ParseUSDC in the browser module: the board reads every work USDC
+// amount through it, and re-formats the parsed units with services.FormatUSDC,
+// so "0.20" is stored as "0.2". A value is a USDC amount only when it is "0" or
+// [1-9][0-9]{0,6} with at most 6 fraction digits; "0,20", "abc", "01.0" and
+// "0.1234567" are not. Checking it here refuses the amount before it is signed,
+// instead of learning from invalid_work_reward that the request was unreadable.
+const USDC_DECIMAL = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,18}))?$/;
+export function usdcUnits(value) {
+  if (typeof value !== 'string') return null;
+  const match = USDC_DECIMAL.exec(value);
+  if (!match || (match[2] ?? '').length > 6) return null;
+  return Number(match[1] + (match[2] ?? '').padEnd(6, '0'));
+}
+// micro-USDC as services.FormatUSDC writes it: no trailing zeros, no padding.
+export function usdcText(units) {
+  const whole = Math.trunc(units / 1_000_000), frac = units % 1_000_000;
+  return frac === 0 ? String(whole) : `${whole}.${String(frac).padStart(6, '0').replace(/0+$/, '')}`;
+}
+// The reward range, as the board words and enforces it (RFC 0016).
+const {work_usdc_minimum_micro: USDC_MIN, work_usdc_maximum_micro: USDC_MAX} = CONTRACT.limits;
+function workUSDCAmount(value, what) {
+  const units = usdcUnits(value);
+  if (units === null || units < USDC_MIN || units > USDC_MAX) {
+    fail('invalid_option', `${what} is a decimal USDC string from ${usdcText(USDC_MIN)} to ${usdcText(USDC_MAX)}, e.g. 0.20.`);
+  }
+  return units;
 }
 // works.list usdcOnly (carlita-bounty-agent bf5e187d): whether a row advertises USDC, a positive
 // reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
@@ -1847,6 +1880,20 @@ export function workCreateData({title, generation, capabilities = [], reward, re
     if (tiers != null && (!Array.isArray(tiers) || tiers.length < 1 || tiers.length > limits.work_standing_tiers_maximum)) fail('invalid_option', `tiers are 1 to ${limits.work_standing_tiers_maximum}.`);
     for (const name of set) data[name] = name === 'tiers' ? tiers.map(standingTier) : standing[camel(name)];
     if (data.tiers?.[0].credits === 0) fail('invalid_option', 'The first tier pays credits: a tier with credits 0 (accepted, unpaid) comes after it.');
+    // The daily USDC caps (parseWorkStanding, C1170): a decimal USDC string from
+    // the reward minimum up to the reward maximum times the day maximum, and
+    // never below the largest tier's own amount. A standing task naming one
+    // reward object with a usdc asset is that task's single tier, so it counts
+    // against the caps too.
+    const paying = data.tiers ?? (reward && typeof reward === 'object' && !Array.isArray(reward) && reward.usdc !== undefined ? [reward] : []);
+    const tierUnits = paying.map(t => usdcUnits(t.usdc) ?? 0);
+    for (const cap of ['usdc_per_agent_day', 'usdc_day_max']) {
+      if (data[cap] === undefined) continue;
+      const units = usdcUnits(data[cap]);
+      if (units === null || units < USDC_MIN || units > USDC_MAX * limits.work_standing_day_maximum) fail('invalid_option', `${cap} is a decimal USDC string, at least ${usdcText(USDC_MIN)}.`);
+      if (!tierUnits.some(Boolean)) fail('invalid_option', `${cap} goes with a tier that pays USDC.`);
+      if (units < Math.max(...tierUnits)) fail('invalid_option', `Each tier’s USDC must fit within ${cap}.`);
+    }
   }
   return dataFor('work.create', data);
 }
