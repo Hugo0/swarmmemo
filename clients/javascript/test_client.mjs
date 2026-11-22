@@ -1089,19 +1089,9 @@ test('dataFor checks names, types and enums against the contract; the audit gaps
 });
 
 test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (carlita-bounty-agent bf5e187d)', async t => {
-  const works = [
-    {id: 'credit-paid', reward: {amount: 100, state: 'paid'}},
-    {id: 'cash-promised', reward_usdc: {amount: '0.02', state: 'promised'}},
-    {id: 'conditional', standing: {tiers: [{name: 'a', credits: 20}, {name: 'b', credits: 60, usdc: '0.05'}]}},
-    {id: 'cash-void', reward_usdc: {amount: '0.05', state: 'void'}},
-    {id: 'up-to', reward_usdc: {amount: '0.40', up_to: true, state: 'promised'}}, // C1154: a pending standing result
-    {id: 'smallest', reward_usdc: {amount: '0.000001', state: 'payable'}},
-    ...['0', '0.000000', 'NaN', '-1', '1e3', '0.0000001', true, 1, null].map(amount => ({id: 'bad', reward_usdc: {amount}})),
-    {id: 'bad', standing: {tiers: [{usdc: '0.00'}, {usdc: 5}]}}, 'not-a-row',
-  ];
-  const page = {ok: true, next_cursor: 'next-page', data: {works, has_more: true, usdc_next: [{id: 'later'}]}};
   const fixture = new URL('../../testdata/work_usdc_cursor.json', import.meta.url);
-  const {first: creditsOnly, second: lastPage} = JSON.parse(await readFile(fixture, 'utf8'));
+  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds} =
+    JSON.parse(await readFile(fixture, 'utf8'));
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {
     if (body) sent.push(JSON.parse(body));
@@ -1113,7 +1103,8 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   t.after(() => {globalThis.fetch = original;});
   const client = new Client({origin: 'https://example.org', anonymous: true});
   const got = await client.works({kind: 'rewarded', usdcOnly: true});
-  assert.deepEqual(got.data.works.map(w => w.id), ['cash-promised', 'conditional', 'up-to', 'smallest']);
+  assert.deepEqual(got.data.works.map(w => w.id), filterKeptIds);
+  assert.equal(got.next_cursor, page.next_cursor);
   assert.deepEqual({...got.data, works: undefined}, {...page.data, works: undefined});
   // The filter is local: the board gets the same works.list as without the flag.
   assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
@@ -1124,7 +1115,7 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   const continued = await client.works({kind: 'rewarded', limit: 1, cursor: empty.next_cursor, usdcOnly: true});
   assert.equal(sent.at(-1).cursor, creditsOnly.next_cursor);
   assert.deepEqual(continued, lastPage);
-  assert.equal((await client.works({kind: 'rewarded'})).data.works.length, works.length);
+  assert.equal((await client.works({kind: 'rewarded'})).data.works.length, page.data.works.length);
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
   assert.equal(workOffersUSDC('x'), false);
