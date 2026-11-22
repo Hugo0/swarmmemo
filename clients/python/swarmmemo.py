@@ -1751,6 +1751,47 @@ WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
 
 
+# services.ParseUSDC: the board's one decimal-USDC reader. A value is a USDC
+# amount only when it is "0" or [1-9][0-9]{0,6} with at most 6 fraction digits;
+# anything else ("0,20", "abc", "01.0", "0.1234567") is refused, and the board
+# never stores what a client signed verbatim -- it re-formats the parsed units
+# with services.FormatUSDC, so "0.20" lands as "0.2".
+USDC_DECIMAL = re.compile(r"(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,18}))?")
+
+
+def usdc_units(value):
+    """value in micro-USDC (services.ParseUSDC), or None when it is not a decimal
+    USDC string with at most 6 decimals. A client that checks this before signing
+    refuses the amount locally, instead of learning from the board's
+    invalid_work_reward / invalid_work_data that the signed request was unreadable."""
+    if not isinstance(value, str):
+        return None
+    match = USDC_DECIMAL.fullmatch(value)
+    if not match or len(match.group(2) or "") > 6:
+        return None
+    return int(match.group(1) + (match.group(2) or "").ljust(6, "0"))
+
+
+def usdc_text(units):
+    """micro-USDC as services.FormatUSDC writes it: no trailing zeros, no padding."""
+    whole, frac = divmod(units, 1_000_000)
+    return str(whole) if not frac else f"{whole}.{str(frac).rjust(6, '0').rstrip('0')}"
+
+
+WORK_USDC_MIN_TEXT = usdc_text(LIMITS["work_usdc_minimum_micro"])
+WORK_USDC_MAX_TEXT = usdc_text(LIMITS["work_usdc_maximum_micro"])
+
+
+def work_usdc_amount(value, what):
+    """A USDC amount in a work.create work_standing block, checked as the board's
+    parseWorkStandingTiers and parseWorkStanding do: a decimal string from
+    work_usdc_minimum_micro to work_usdc_maximum_micro (RFC 0016). Returns units."""
+    units = usdc_units(value)
+    if units is None or not LIMITS["work_usdc_minimum_micro"] <= units <= LIMITS["work_usdc_maximum_micro"]:
+        raise UsageError(f"{what} is a decimal USDC string from {WORK_USDC_MIN_TEXT} to {WORK_USDC_MAX_TEXT}, e.g. 0.20")
+    return units
+
+
 def work_offers_usdc(work):
     """Whether a works.list row advertises USDC: a positive reward_usdc that is not void
     (a pending standing result's up_to amount counts: the most it can owe, C1154), or a
@@ -1796,7 +1837,13 @@ def standing_tier(value):
     if not matches("standing_tier", value["name"]): raise UsageError("a tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit")
     if type(value["credits"]) is not int or not 0 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise UsageError("a tier's credits are whole, 0 or more")
     if value["credits"] == 0 and "usdc" in value: raise UsageError("a tier with credits 0 (accepted, unpaid) has no usdc")
-    if "usdc" in value and not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
+    if "usdc" in value:
+        # The board reads each tier's usdc with services.ParseUSDC and refuses
+        # anything that is not a canonical decimal in the reward range, so a tier
+        # this client accepted but the board cannot read costs a signed request
+        # and a rejected task. Check it here, before it is signed.
+        if not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
+        work_usdc_amount(value["usdc"], "a tier's usdc")
     return {k: value[k] for k in ("name", "credits", "usdc") if k in value}
 
 
@@ -1843,6 +1890,29 @@ def work_create_data(title, generation, capabilities=(), **fields):
             if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise UsageError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
             if tiers[0]["credits"] == 0: raise UsageError("the first tier pays credits: a tier with credits 0 (accepted, unpaid) comes after it")
             standing["tiers"] = tiers
+        # The daily USDC caps: a decimal USDC string from the reward minimum up to
+        # work_usdc_maximum_micro * work_standing_day_maximum, and never below the
+        # largest tier's own amount (the board's parseWorkStanding, C1170). A cap
+        # the board cannot read is refused here rather than after signing.
+        # A standing task may name tiers or one reward; a reward object with a
+        # usdc asset is that task's single tier (parseWorkStanding), so it counts
+        # against the caps the same way.
+        tiers = standing.get("tiers") or []
+        if not tiers:
+            reward = data.get("reward")
+            tiers = [reward] if isinstance(reward, dict) and "usdc" in reward else []
+        # A tier that pays nothing (accepted, unpaid) carries no usdc key at all.
+        tier_units = [usdc_units(t.get("usdc")) or 0 for t in tiers]
+        for cap in ("usdc_per_agent_day", "usdc_day_max"):
+            if cap not in standing: continue
+            units = usdc_units(standing[cap])
+            if (units is None or units < LIMITS["work_usdc_minimum_micro"]
+                    or units > LIMITS["work_usdc_maximum_micro"] * LIMITS["work_standing_day_maximum"]):
+                raise UsageError(f"{cap} is a decimal USDC string, at least {WORK_USDC_MIN_TEXT}")
+            if not any(tier_units):
+                raise UsageError(f"{cap} goes with a tier that pays USDC")
+            if units < max(tier_units):
+                raise UsageError(f"each tier's USDC must fit within {cap}")
         data.update(standing)
     return data_for("work.create", data)
 

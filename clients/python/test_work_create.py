@@ -247,6 +247,53 @@ class StandingCreateTest(unittest.TestCase):
             with self.subTest(tiers=tiers), self.assertRaises(ValueError):
                 memo.work_create_data("t", "g", seats=2, tiers=tiers)
 
+    def test_a_usdc_amount_is_the_boards_decimal_or_nothing(self):
+        """C1361: a tier's usdc and the daily USDC caps are read by the board's
+        services.ParseUSDC, which takes "0" or [1-9][0-9]{0,6} with at most 6
+        fraction digits and nothing else. Before this check the client signed any
+        string it was handed, so "0,20", "abc", "01.0" and "0.1234567" left as a
+        signed work.create the board refused with invalid_work_data -- one round
+        trip, no task, and a client that never learned which field was wrong."""
+        for value in ("0,20", "abc", "01.0", "0.1234567", "", " 0.20", "0.20 ", ".20", "1e-2", "-0.20"):
+            with self.subTest(usdc=value), self.assertRaises(ValueError):
+                memo.standing_tier({"name": "bug", "credits": 500, "usdc": value})
+        # The range the board enforces, not just the shape: 0.01 through 1000.
+        for value in ("0.001", "1000.01", "2000"):
+            with self.subTest(usdc=value), self.assertRaises(ValueError):
+                memo.standing_tier({"name": "bug", "credits": 500, "usdc": value})
+        for value in ("0.01", "0.20", "0.123456", "1000"):
+            with self.subTest(usdc=value):
+                self.assertEqual(memo.standing_tier({"name": "bug", "credits": 500, "usdc": value})["usdc"], value)
+
+    def test_daily_usdc_caps_are_checked_before_signing(self):
+        """parseWorkStanding (C1170): usdc_per_agent_day and usdc_day_max are
+        decimal USDC strings from the minimum up to work_usdc_maximum_micro times
+        work_standing_day_maximum, they need a tier that pays USDC, and no tier's
+        amount may exceed them. The client checked none of that."""
+        build = lambda **f: memo.work_create_data("t", "g", capabilities=["code"], seats=2, **f)
+        paying = {"credits": 100, "usdc": "0.20"}
+        for fields in ({"reward": paying, "usdc_per_agent_day": "abc"},
+                       {"reward": paying, "usdc_day_max": "0,20"},
+                       {"reward": paying, "usdc_per_agent_day": "0.005"},
+                       {"reward": paying, "usdc_per_agent_day": "0.10"},
+                       {"reward": paying, "usdc_day_max": "0.15"},
+                       # The cap's real ceiling is the reward maximum times the day
+                       # maximum (1000 USDC x 1000), not 1000 itself.
+                       {"reward": paying, "usdc_day_max": "1000001"},
+                       {"reward": {"credits": 100}, "usdc_per_agent_day": "0.20"},
+                       {"usdc_per_agent_day": "0.20"}):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                build(**fields)
+        # What the board accepts builds unchanged: the cap only has to cover each
+        # tier, and a reward object with a usdc asset is that task's single tier.
+        self.assertEqual(build(reward=paying, usdc_per_agent_day="0.20", usdc_day_max="0.40")["usdc_per_agent_day"], "0.20")
+        self.assertEqual(build(tiers=["bug:300:0.20", "bug+fix:500:0.40"], usdc_per_agent_day="0.40", usdc_day_max="2.00")["usdc_day_max"], "2.00")
+        # A tier that pays nothing carries no usdc key, so it cannot satisfy the
+        # "goes with a tier that pays USDC" rule -- but it must not raise a
+        # TypeError either: it simply leaves no paying tier to cover.
+        with self.assertRaises(ValueError):
+            build(tiers=["bug:5", "valid-negative:0"], usdc_per_agent_day="0.20")
+
 
 class WorkCancelTest(unittest.TestCase):
     """C346: the requester closes a standing task early with work.cancel, from the
