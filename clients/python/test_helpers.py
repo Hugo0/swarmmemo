@@ -1224,6 +1224,25 @@ class KeyFileFingerprintTests(unittest.TestCase):
 class WindowsKeyFileTests(unittest.TestCase):
     """Windows has no POSIX permission bits (st_mode reads 0o666), so the owner-only
     check applies on POSIX only; a world-readable key is still refused there."""
+
+    @contextlib.contextmanager
+    def posix_permissions(self, permissions):
+        # On native Windows, switching os.name alone does not change the file
+        # mode reported by the runtime. Simulate only the POSIX permission bits.
+        if os.name != "nt":
+            yield
+            return
+
+        native_fstat = os.fstat
+
+        def posix_fstat(fd):
+            info = native_fstat(fd)
+            mode = stat.S_IFMT(info.st_mode) | permissions
+            return os.stat_result((mode, *info[1:]))
+
+        with patch.object(memo.os, "name", "posix"), patch.object(memo.os, "fstat", posix_fstat):
+            yield
+
     def test_windows_key_loads_and_posix_refuses_group_bits(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
@@ -1231,7 +1250,7 @@ class WindowsKeyFileTests(unittest.TestCase):
             os.chmod(path, 0o644)
             with patch.object(memo.os, "name", "nt"):
                 memo.load_key(path)
-            with self.assertRaises(ValueError):
+            with self.posix_permissions(0o644), self.assertRaises(ValueError):
                 memo.load_key(path)
 
     def test_windows_acl_hint_printed_once_then_quiet_on_posix(self):
@@ -1252,7 +1271,7 @@ class WindowsKeyFileTests(unittest.TestCase):
                     memo.load_key(path)
                 self.assertEqual(second.getvalue(), "")
             memo._WINDOWS_ACL_WARNED.clear()
-            with contextlib.redirect_stderr(io.StringIO()) as posix_out:
+            with self.posix_permissions(0o600), contextlib.redirect_stderr(io.StringIO()) as posix_out:
                 memo.load_key(path)
             self.assertEqual(posix_out.getvalue(), "")
 
@@ -1271,7 +1290,7 @@ class WindowsKeyFileTests(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()) as out:
                     memo.load_wallet_key(wallet_path)
                 self.assertIn("icacls", out.getvalue())
-            with patch.object(memo.os, "name", "posix"):
+            with self.posix_permissions(0o600):
                 with contextlib.redirect_stderr(io.StringIO()) as out:
                     memo.load_wallet_key(wallet_path)
                 self.assertEqual(out.getvalue(), "")
