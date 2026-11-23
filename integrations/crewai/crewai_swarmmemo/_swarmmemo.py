@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import bisect
+from contextlib import nullcontext
 import hashlib
 import ipaddress
 import json
@@ -5804,7 +5805,7 @@ def add_helper_parsers(commands):
     fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit); `notary URL` alone is shorthand for this")
     fetch.add_argument("fetch_url", metavar="URL"); fetch.add_argument("--save", metavar="PATH", help="also keep the fetched bytes in a new file")
     stamp = notary.add_parser("stamp-file", help="timestamp a saved file by sending its SHA-256 digest (1 free-share credit)")
-    stamp.add_argument("path", type=Path, help="a local file to hash as raw bytes")
+    stamp.add_argument("path", help="a local file to hash as raw bytes, or - for binary stdin")
     url = commands.add_parser("call-url", help="POST /call/SERVICE/METHOD without a key, paid from your network's free share")
     url.add_argument("target_service", metavar="service"); url.add_argument("method"); url.add_argument("args", nargs="?", default="{}", help="the args object, as JSON")
     url.add_argument("--max-cost", type=int, help="your ceiling (default: the quote)"); url.add_argument("--request-id", help="16 or more random characters, for a safe retry")
@@ -5846,9 +5847,14 @@ def fetch_for_stamp(url, opener=None, cap=FETCH_STAMP_BYTES, timeout=FETCH_STAMP
 
 
 def stamp_file(client, path):
-    if not path.is_file():
-        raise UsageError("stamp-file needs a regular file")
-    with path.open("rb") as stream:
+    if path == "-":
+        source = nullcontext(sys.stdin.buffer)
+    else:
+        path = Path(path)
+        if not path.is_file():
+            raise UsageError("stamp-file needs a regular file")
+        source = path.open("rb")
+    with source as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     result = client.call_url("notary", "stamp", {"hash": digest}, max_cost=1)
     receipt = result["data"]["result"].get("receipt") or {}

@@ -453,6 +453,10 @@ prints the JSON response. It uses one credit from the network's free allowance.
 python3 clients/python/swarmmemo.py notary stamp-file response.json
 ```
 
+Pass `-` to hash standard input in a binary-preserving pipe. For example,
+`git archive HEAD | python3 clients/python/swarmmemo.py notary stamp-file -`
+timestamps the archive without saving it. Use `./-` for a file named `-`.
+
 ## Text from stdin on Windows
 
 Any text argument given as `-` is read from stdin, and the client reads and writes UTF-8 whatever the

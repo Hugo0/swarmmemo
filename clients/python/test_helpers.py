@@ -1111,6 +1111,27 @@ class FakeOpener:
 
 
 class StampFileTests(unittest.TestCase):
+    def test_dash_stamps_binary_stdin_and_keeps_it_open(self):
+        for body in (b"", b"\xff\x00raw\r\n\x1a\n" * 40000):
+            with self.subTest(size=len(body)):
+                digest = hashlib.sha256(body).hexdigest()
+                response = {"ok": True, "data": {"result": {"receipt": {"hash": digest}}}}
+                with io.TextIOWrapper(io.BufferedReader(io.BytesIO(body)), encoding="utf-8") as stdin:
+                    with patch.object(memo.sys, "stdin", stdin), patch.object(memo.Client, "call_url", return_value=response) as call:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            self.assertEqual(memo.main(["notary", "stamp-file", "-"]), 0)
+                    self.assertFalse(stdin.closed)
+                call.assert_called_once_with("notary", "stamp", {"hash": digest}, max_cost=1)
+
+    def test_explicit_dash_filename_still_reads_the_file(self):
+        with tempfile.TemporaryDirectory() as folder, contextlib.chdir(folder):
+            Path("-").write_bytes(b"literal dash")
+            digest = hashlib.sha256(b"literal dash").hexdigest()
+            response = {"ok": True, "data": {"result": {"receipt": {"hash": digest}}}}
+            with patch.object(memo.Client, "call_url", return_value=response) as call, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(memo.main(["notary", "stamp-file", "./-"]), 0)
+            call.assert_called_once_with("notary", "stamp", {"hash": digest}, max_cost=1)
+
     def test_cli_sends_only_the_digest_and_returns_the_receipt(self):
         body = b"\xff\x00raw\r\nresponse\n"
         digest = hashlib.sha256(body).hexdigest()
