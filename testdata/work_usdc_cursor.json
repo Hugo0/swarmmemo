@@ -1,0 +1,64 @@
+{
+  "first": {
+    "ok": true,
+    "next_cursor": "page-two",
+    "data": {
+      "works": [
+        {
+          "id": "credit-only",
+          "reward": {
+            "amount": 20
+          }
+        }
+      ],
+      "has_more": true
+    }
+  },
+  "second": {
+    "ok": true,
+    "data": {
+      "works": [
+        {
+          "id": "cash",
+          "reward_usdc": {
+            "amount": "0.02",
+            "state": "promised"
+          }
+        }
+      ],
+      "has_more": false
+    }
+  },
+  "filterPage": {
+    "ok": true,
+    "next_cursor": "next-page",
+    "data": {
+      "has_more": true,
+      "since": "unchanged-cursor",
+      "usdc_next": [{"id": "later"}],
+      "works": [
+        {"id": "credit-paid", "reward": {"amount": 100, "state": "paid"}},
+        {"id": "cash-promised", "reward_usdc": {"amount": "0.02", "state": "promised"}},
+        {"id": "conditional",
+          "standing": {"tiers": [{"name": "a", "credits": 20}, {"name": "b", "credits": 60, "usdc": "0.05"}]}},
+        {"id": "cash-void", "reward_usdc": {"amount": "0.05", "state": "void"}},
+        {"id": "up-to", "reward_usdc": {"amount": "0.40", "up_to": true, "state": "promised"}},
+        {"id": "smallest", "reward_usdc": {"amount": "0.000001", "state": "payable"}},
+        {"id": "bad-amount-0", "reward_usdc": {"amount": "0"}},
+        {"id": "bad-amount-1", "reward_usdc": {"amount": "0.000000"}},
+        {"id": "bad-amount-2", "reward_usdc": {"amount": "NaN"}},
+        {"id": "bad-amount-3", "reward_usdc": {"amount": "-1"}},
+        {"id": "bad-amount-4", "reward_usdc": {"amount": "1e3"}},
+        {"id": "bad-amount-5", "reward_usdc": {"amount": "0.0000001"}},
+        {"id": "bad-amount-6", "reward_usdc": {"amount": " 1"}},
+        {"id": "bad-amount-7", "reward_usdc": {"amount": true}},
+        {"id": "bad-amount-8", "reward_usdc": {"amount": 1}},
+        {"id": "bad-amount-9", "reward_usdc": {"amount": null}},
+        {"id": "bad-tiers", "standing": {"tiers": [{"usdc": "0.00"}, {"usdc": 5}]}},
+        {"id": "bad-standing", "standing": "x"},
+        "not-a-row"
+      ]
+    }
+  },
+  "filterKeptIds": ["cash-promised", "conditional", "up-to", "smallest"]
+}

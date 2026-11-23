@@ -1664,10 +1664,19 @@ func errPerAgentCooldown(days, at, now int64) error {
 // reviewer) whose accept of a direct reply ran the claim for the reply's
 // author (C1065, as workClaimCooldownReplyText does for the claim pause):
 // the cool-down is the author's, details.next_open_at the author's next
-// claim, and the same accept goes through from then. Any other err is
-// returned as it is.
+// claim, and the same accept goes through from then. A per_agent_max
+// refusal is worded the same way (C1211): the author's quota is used for
+// good, a rejected result included. Any other err is returned as it is.
 func perAgentCooldownForReply(err error) error {
 	var e *Error
+	if errors.As(err, &e) && e.Code == "per_agent_max_reached" {
+		details, _ := e.Details.(map[string]any)
+		perMax, _ := details["per_agent_max"].(int64)
+		sent, _ := details["sent"].(int64)
+		e.Message = fmt.Sprintf("The reply's author has used this standing task's per-agent limit: it takes %s per agent (per_agent_max), and the author, or a key linked to it, has sent %d (accepted, waiting or rejected; a rejected one counts). The board cannot take this reply as another result for it. Your account is not limited. Leave the reply, or point its author at your next round.",
+			plural(perMax, "result"), sent)
+		return e
+	}
 	if !errors.As(err, &e) || e.Code != "per_agent_cooldown" {
 		return err
 	}

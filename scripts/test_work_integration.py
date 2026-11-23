@@ -15,6 +15,8 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "clients/python"))
 import swarmmemo as memo
+sys.path.insert(0, str(ROOT / "scripts"))
+import fixture_ports
 import swarmmemo_outbox as outbox
 
 
@@ -34,7 +36,9 @@ class CrossRuntimeWorkTests(unittest.TestCase):
                     process = subprocess.Popen([binary, "serve"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     for _ in range(100):
                         try:
-                            with urllib.request.urlopen(origin + "/health", timeout=1): return process
+                            with urllib.request.urlopen(origin + "/health", timeout=1): pass
+                            if problem := fixture_ports.problem(process.pid, port): self.fail(problem)
+                            return process
                         except OSError:
                             if process.poll() is not None: self.fail("fixture server exited")
                             time.sleep(.05)
@@ -99,6 +103,7 @@ class CrossRuntimeWorkTests(unittest.TestCase):
                         if process.poll() is not None: self.fail("fixture server exited")
                         time.sleep(.05)
                 else: self.fail("fixture server startup failed")
+                if problem := fixture_ports.problem(process.pid, port): self.fail(problem)
                 requester_path, worker_path = local / "requester.json", local / "worker.json"
                 requester_info = memo.keygen(requester_path); memo.keygen(worker_path)
                 requester = memo.Client(origin, memo.load_key(requester_path))

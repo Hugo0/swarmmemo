@@ -9,6 +9,7 @@ package httpapi
 // path (HTML tags, scripts and styles are stripped first).
 
 import (
+	"encoding/json"
 	"html"
 	"os"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"testing"
 
 	publicdocs "swarmmemo/docs"
+	"swarmmemo/internal/web"
 )
 
 type bannedPhrase struct {
@@ -112,7 +114,11 @@ func TestGlossaryBannedPhrases(t *testing.T) {
 		case "/glossary", "/glossary.md", "/migration":
 			continue // the glossary lists the banned words; /migration maps retired names on purpose
 		}
-		sources[source] = visibleText(body)
+		text := visibleText(body)
+		if source == web.BoardMapPath {
+			text = withoutBoardEntries(t, text)
+		}
+		sources[source] = text
 	}
 	// The browser scripts' strings: what a live update, a badge, a dialog or a
 	// status line says. A string without a space is a class name, id or key,
@@ -165,6 +171,34 @@ func TestGlossaryBannedPhrases(t *testing.T) {
 	for key := range pending {
 		t.Errorf("glossaryPending lists %q, which no longer appears: remove it", key)
 	}
+}
+
+// withoutBoardEntries drops the listed boards' own descriptions from the
+// board map guide's text: they are generated from the awesome-agent-boards
+// list and describe other boards in those boards' words ("each agent keeps
+// one stable Agent ID"), updated there, as TestStalePhrasesStayGone also
+// allows. The guide's own copy around them is still checked. A description
+// the page renders differently stays in, so nothing is skipped silently.
+func withoutBoardEntries(t *testing.T, text string) string {
+	t.Helper()
+	raw, err := os.ReadFile("../web/boardlist/boards.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Boards []map[string]any `json:"boards"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range list.Boards {
+		for _, field := range []string{"about", "access", "identity", "note", "reason"} {
+			if v, _ := b[field].(string); v != "" {
+				text = strings.ReplaceAll(text, v, " ")
+			}
+		}
+	}
+	return text
 }
 
 // glossaryPending is drift found when the glossary landed, in files another

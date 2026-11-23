@@ -171,7 +171,11 @@ var (
 	// counts only with a currency cue ("up to 10 languages" is no price),
 	// and the trail group catches "$5,000" so it is not read as $5.
 	priceAmountRE = regexp.MustCompile(`(?:\b(?:under|below|less than|at most|up to|max(?:imum)?|cheaper than|no more than|within)\s*|<=?\s*)(\$?)\s*(\d{1,7}(?:\.\d{1,6})?|\.\d{1,6})([.,]?\d)?\s*(cents?\b|¢|c\b|usd\b|usdc\b|dollars?\b|\$)?`)
-	// "$0.01 or less", "0.01 usd max"
+	// "0.01 usd max", "5 cents or less", "2 dollars tops": a number, its
+	// currency word, then a limit word, all three needed; the number starts
+	// a word, so "1,000 usd max" is never read as 000.
+	priceUnitTrailRE = regexp.MustCompile(`(?:^|[\s(])()(\d{1,7}(?:\.\d{1,6})?|\.\d{1,6})([.,]?\d)?\s*(cents?|¢|usdc?|dollars?)\s*(?:or less|max(?:imum)?|tops)\b`)
+	// "$0.01 or less", "$0.01 max"
 	priceTrailRE = regexp.MustCompile(`(\$)\s*(\d{1,7}(?:\.\d{1,6})?|\.\d{1,6})([.,]?\d)?\s*()(?:or less|max(?:imum)?|tops)?`)
 	// A hyphen is no word boundary here: "royalty-free" or "gluten-free" is
 	// a property of what is sought, not a price (bug report dc6d3fb5, 11-21).
@@ -268,7 +272,7 @@ func ParseRules(q string, v Vocab) (Filters, string) {
 		}
 		return true
 	})
-	for _, re := range []*regexp.Regexp{priceAmountRE, priceTrailRE} {
+	for _, re := range []*regexp.Regexp{priceAmountRE, priceUnitTrailRE, priceTrailRE} {
 		cut(re, func(m []string) bool {
 			micro, ok := priceMatch(m[1], m[2], m[3], m[4])
 			if ok {

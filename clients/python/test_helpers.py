@@ -239,7 +239,8 @@ class HelperTests(unittest.TestCase):
                     saved = json.loads(path.read_text())
                     self.assertEqual(saved, self.recorder.sent[-1][1])
                     self.assertEqual(self.shown(saved)["operation"], operation)
-                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    if os.name == "posix":
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                     original = path.read_bytes()
                     self.recorder.sent.clear()
                     with self.assertRaises(FileExistsError):
@@ -266,7 +267,8 @@ class HelperTests(unittest.TestCase):
                     saved = json.loads(path.read_text())
                     self.assertEqual(saved, self.recorder.sent[-1][1])
                     self.assertEqual(json.loads(self.shown(saved)["data"])["reviewer"], AGENT)
-                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    if os.name == "posix":
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                     self.recorder.sent.clear()
                     with self.assertRaises(FileExistsError):
                         invoke(client, reviewer)
@@ -328,7 +330,8 @@ class HelperTests(unittest.TestCase):
             next(pages)
             self.assertEqual(self.last()["cursor"], "explicit1")
             self.assertEqual(memo.read_private(path, {})["cursor"], "explicit1")
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             pages.close()
 
     def test_cli_memory_list_sends_after(self):
@@ -382,6 +385,24 @@ class HelperTests(unittest.TestCase):
                     else:
                         memo.run_helper(args, self.anonymous)
                 self.assertEqual(sent[0]["cursor"], "resume")
+
+    def test_works_usdc_only_follows_cursor_after_empty_filtered_page(self):
+        fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+        pages = json.loads(fixture.read_text(encoding="utf-8"))
+        cursor = pages["first"]["next_cursor"]
+        replies = {None: pages["first"], cursor: pages["second"]}
+
+        def request(path, body):
+            self.assertEqual(body["operation"], "works.list")
+            return replies[body.get("cursor")]
+
+        with patch.object(self.anonymous, "_request", side_effect=request):
+            first = self.anonymous.works(usdc_only=True)
+            self.assertEqual(first["data"]["works"], [])
+            self.assertTrue(first["data"]["has_more"])
+            second = self.anonymous.works(cursor=first["next_cursor"], usdc_only=True)
+            self.assertEqual(second, pages["second"])
+            self.assertFalse(second["data"]["has_more"])
 
     def test_works_since_uses_command_cursor_and_keeps_filters(self):
         token = "since." + GENERATION + "." + "a" * 22
@@ -644,7 +665,8 @@ class HelperTests(unittest.TestCase):
             self.assertFalse(path.exists())  # saved once the page is handled, never before
             next(pages)
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c1"})
-            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
             self.assertEqual(self.last(), {"operation": "updates.get", "target": self.me, "cursor": "c1", "data": '{"schema":1,"wait":20}'})
             pages.close()
             resumed = self.signed.follow_updates(path)
@@ -938,7 +960,8 @@ class EmbedSetupTests(unittest.TestCase):
     def test_first_run_owns_room_posts_signed_and_prints_snippet(self):
         code, out, _ = self.full()
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(self.key.stat().st_mode & 0o777, 0o600)
         me = hashlib.sha256(memo.public_bytes(memo.load_key(self.key))).hexdigest()
         self.assertIn(f"created {self.key} (mode 600), fingerprint {me}", out)
         self.assertEqual(self.board.operations(), ["agent.get", "agent.register", "room.get", "room.create", "messages.list",
@@ -1087,6 +1110,29 @@ class FakeOpener:
         return self.page
 
 
+class StampFileTests(unittest.TestCase):
+    def test_cli_sends_only_the_digest_and_returns_the_receipt(self):
+        body = b"\xff\x00raw\r\nresponse\n"
+        digest = hashlib.sha256(body).hexdigest()
+        response = {"ok": True, "data": {"result": {"receipt": {"hash": digest, "seq": 17}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "original.bin"
+            source.write_bytes(body)
+            output = io.StringIO()
+            with patch.object(memo.Client, "call_url", return_value=response) as call, contextlib.redirect_stdout(output):
+                self.assertEqual(memo.main(["notary", "stamp-file", str(source)]), 0)
+            call.assert_called_once_with("notary", "stamp", {"hash": digest}, max_cost=1)
+            self.assertEqual(json.loads(output.getvalue()), response)
+
+    def test_mismatched_receipt_is_refused(self):
+        response = {"ok": True, "data": {"result": {"receipt": {"hash": "0" * 64}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "empty"
+            source.touch()
+            with patch.object(memo.Client, "call_url", return_value=response), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(memo.main(["notary", "stamp-file", str(source)]), 1)
+
+
 class StampFetchTests(unittest.TestCase):
     """notary stamp-fetch (C159): the exact bytes fetched are hashed, and the record of
     the fetch is stamped as text; its SHA-256 is the receipt's hash."""
@@ -1224,6 +1270,25 @@ class KeyFileFingerprintTests(unittest.TestCase):
 class WindowsKeyFileTests(unittest.TestCase):
     """Windows has no POSIX permission bits (st_mode reads 0o666), so the owner-only
     check applies on POSIX only; a world-readable key is still refused there."""
+
+    @contextlib.contextmanager
+    def posix_permissions(self, permissions):
+        # On native Windows, switching os.name alone does not change the file
+        # mode reported by the runtime. Simulate only the POSIX permission bits.
+        if os.name != "nt":
+            yield
+            return
+
+        native_fstat = os.fstat
+
+        def posix_fstat(fd):
+            info = native_fstat(fd)
+            mode = stat.S_IFMT(info.st_mode) | permissions
+            return os.stat_result((mode, *info[1:]))
+
+        with patch.object(memo.os, "name", "posix"), patch.object(memo.os, "fstat", posix_fstat):
+            yield
+
     def test_windows_key_loads_and_posix_refuses_group_bits(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "agent.json"
@@ -1231,7 +1296,7 @@ class WindowsKeyFileTests(unittest.TestCase):
             os.chmod(path, 0o644)
             with patch.object(memo.os, "name", "nt"):
                 memo.load_key(path)
-            with self.assertRaises(ValueError):
+            with self.posix_permissions(0o644), self.assertRaises(ValueError):
                 memo.load_key(path)
 
     def test_windows_acl_hint_printed_once_then_quiet_on_posix(self):
@@ -1252,7 +1317,7 @@ class WindowsKeyFileTests(unittest.TestCase):
                     memo.load_key(path)
                 self.assertEqual(second.getvalue(), "")
             memo._WINDOWS_ACL_WARNED.clear()
-            with contextlib.redirect_stderr(io.StringIO()) as posix_out:
+            with self.posix_permissions(0o600), contextlib.redirect_stderr(io.StringIO()) as posix_out:
                 memo.load_key(path)
             self.assertEqual(posix_out.getvalue(), "")
 
@@ -1271,7 +1336,7 @@ class WindowsKeyFileTests(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()) as out:
                     memo.load_wallet_key(wallet_path)
                 self.assertIn("icacls", out.getvalue())
-            with patch.object(memo.os, "name", "posix"):
+            with self.posix_permissions(0o600):
                 with contextlib.redirect_stderr(io.StringIO()) as out:
                     memo.load_wallet_key(wallet_path)
                 self.assertEqual(out.getvalue(), "")
@@ -1337,7 +1402,8 @@ class WritePrivateStaging(unittest.TestCase):
             memo.write_private(path, {"cursor": "c2"})
             self.assertEqual(other.read_text(), "my notes")
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c2"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(sorted(p.name for p in Path(folder).iterdir()), ["cursor.json", "cursor.tmp"])
 
     def test_a_failed_replace_keeps_the_old_state_and_cleans_up(self):
@@ -1385,7 +1451,8 @@ class WritePrivateSymlinkedFolder(unittest.TestCase):
             path = Path(root) / "state" / "cursor.json"
             memo.write_private(path, {"cursor": "c1"})
             self.assertEqual(json.loads(path.read_text()), {"cursor": "c1"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual([p.name for p in path.parent.iterdir()], ["cursor.json"])
 
 

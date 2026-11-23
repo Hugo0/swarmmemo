@@ -1,9 +1,9 @@
 package services_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"swarmmemo/internal/services"
@@ -148,42 +148,116 @@ func FuzzRobots(f *testing.F) {
 	})
 }
 
-// The converter's work is linear in the page: adversarial pages of the
-// largest size a fetch reads convert quickly.
+// The converter's work is linear in the page, counted, not timed: on
+// adversarial pages at four sizes up to the largest a fetch reads, its work
+// per byte of page (convertHTML) does not grow with the size, as it would
+// about tenfold per step if any part were quadratic, and at the largest size
+// it stays under htmlWorkPerByte. Each page is tried smallest first and
+// stops at its first failure, so a quadratic converter fails in
+// milliseconds instead of running for minutes on the big pages.
 func TestHTMLToTextIsLinear(t *testing.T) {
+	const (
+		htmlWorkPerByte = 16  // at the largest size; the worst page here ("lt run") measures 5
+		growthMax       = 1.5 // per-byte work at 10x the size over that at 1x: linear is at most 1, quadratic 10
+	)
 	n := services.FetchBodyBytes
-	for name, doc := range map[string]string{
-		"open tags":    strings.Repeat("<p>", n/3),
-		"open links":   strings.Repeat("<a href=x>y", n/11),
-		"raw no close": strings.Repeat("<title>", n/7),
-		"near close":   "<script>" + strings.Repeat("</scrip", n/7),
-		"attributes":   "<a " + strings.Repeat("b=c ", n/4),
-		"lt run":       strings.Repeat("<", n),
-		"entities":     strings.Repeat("&amp;", n/5),
-		"nested skip":  strings.Repeat("<nav>", n/5),
-		"pre":          strings.Repeat("<pre>x", n/6),
-		"cells":        strings.Repeat("<td>x", n/5),
-		"short links":  strings.Repeat("<a href=x>y</a>", n/15),
+	base := "https://site.example/" + strings.Repeat("d", 1900) + "/"
+	// A link resolves against the page's URL: the link pages below make
+	// every resolution yield no text, one against a base far longer than a
+	// fetch's URL can be.
+	bases := map[string]string{"bad links, huge base": "https://site.example/" + strings.Repeat("d/", 3*services.FetchURLBytes)}
+	for name, page := range map[string]func(n int) string{
+		"open tags":    func(n int) string { return strings.Repeat("<p>", n/3) },
+		"open links":   func(n int) string { return strings.Repeat("<a href=x>y", n/11) },
+		"raw no close": func(n int) string { return strings.Repeat("<title>", n/7) },
+		"near close":   func(n int) string { return "<script>" + strings.Repeat("</scrip", n/7) },
+		"attributes":   func(n int) string { return "<a " + strings.Repeat("b=c ", n/4) },
+		"lt run":       func(n int) string { return strings.Repeat("<", n) },
+		"entities":     func(n int) string { return strings.Repeat("&amp;", n/5) },
+		"nested skip":  func(n int) string { return strings.Repeat("<nav>", n/5) },
+		"pre":          func(n int) string { return strings.Repeat("<pre>x", n/6) },
+		"cells":        func(n int) string { return strings.Repeat("<td>x", n/5) },
+		"short links":  func(n int) string { return strings.Repeat("<a href=x>y</a>", n/15) },
+		"comments":     func(n int) string { return strings.Repeat("<!--", n/4) },
+		"cdata":        func(n int) string { return strings.Repeat("<![CDATA[", n/9) },
+		"open quote":   func(n int) string { return strings.Repeat("<a href=\"x", n/10) },
+		"digit tags":   func(n int) string { return strings.Repeat("<1", n/2) },
+		// Links whose resolution yields no text: a target fetch refuses to
+		// print, an empty label, an attribute left open.
+		"bad links":            func(n int) string { return strings.Repeat("<a href=(>", n/10) },
+		"empty links":          func(n int) string { return strings.Repeat("<a href=x></a>", n/14) },
+		"unclosed attrs":       func(n int) string { return strings.Repeat("<a href=( title=\"></a>", n/22) },
+		"bad links, huge base": func(n int) string { return strings.Repeat("<a href=(>", n/10) },
 	} {
-		start := time.Now()
-		_, text := services.HTMLToTextForTest(doc, "https://site.example/"+strings.Repeat("d", 1900)+"/")
-		if len(text) > services.FetchOffsetMax+4<<10 { // all of it reachable with offset, never more
-			t.Errorf("%s: %d bytes of text", name, len(text))
+		prev := 0.0
+		pageBase := base
+		if b, ok := bases[name]; ok {
+			pageBase = b
 		}
-		if d := time.Since(start); d > 2*time.Second {
-			t.Errorf("%s: %v", name, d)
+		for _, size := range []int{n / 1000, n / 100, n / 10, n} {
+			doc := page(size)
+			text, work := services.HTMLToTextWorkForTest(doc, pageBase)
+			if len(text) > services.FetchOffsetMax+4<<10 { // all of it reachable with offset, never more
+				t.Errorf("%s at %d bytes: %d bytes of text", name, len(doc), len(text))
+			}
+			perByte := float64(work) / float64(len(doc))
+			t.Logf("%s at %d bytes: work %d, %.2f per byte", name, len(doc), work, perByte)
+			if prev > 0 && perByte > growthMax*prev {
+				t.Errorf("%s at %d bytes: %.2f work per byte, %.2f at a tenth the size: not linear", name, len(doc), perByte, prev)
+				break
+			}
+			if size == n && perByte > htmlWorkPerByte {
+				t.Errorf("%s at %d bytes: %.2f work per byte, over %d", name, len(doc), perByte, htmlWorkPerByte)
+			}
+			prev = perByte
 		}
 	}
+	// robots.txt: parsing is linear in the file, and a decision's matches
+	// take at most (len(path)+2) x (len(pattern)+1) steps for each rule
+	// kept, which the caps on the rules kept bound (fetch_robots.go).
+	path := "/" + strings.Repeat("a", services.FetchURLBytes)
+	limit := (len(path) + 2) * services.RobotsPatternCapForTest
 	for name, body := range map[string]string{
 		"stars":  "User-agent: *\nDisallow: /" + strings.Repeat("*a", 500) + "\n",
 		"many":   "User-agent: *\n" + strings.Repeat("Disallow: /a*b*c*d\n", 5000),
 		"agents": strings.Repeat("User-agent: *\n", 20000) + strings.Repeat("Disallow: /a*a*a*b\n", 2000),
 		"heavy":  "User-agent: *\n" + strings.Repeat("Disallow: /"+strings.Repeat("*a", 500)+"b\n", 2000),
+		// One star then a long tail that fails at its end: every start
+		// the star tries matches most of the tail, the worst case.
+		"long tail": "User-agent: *\n" + strings.Repeat("Disallow: /*"+strings.Repeat("a", 1000)+"b\n", 40),
 	} {
-		start := time.Now()
-		services.RobotsAllowedForTest(body, "/"+strings.Repeat("a", services.FetchURLBytes))
-		if d := time.Since(start); d > 2*time.Second {
-			t.Errorf("robots %s: %v", name, d)
+		parse, match, bound := services.RobotsStepsForTest(body, path)
+		t.Logf("robots %s: parse %d steps for %d bytes, match %d steps, bound %d", name, parse, len(body), match, bound)
+		if parse > 2*len(body) {
+			t.Errorf("robots %s: parsing %d bytes took %d steps", name, len(body), parse)
 		}
+		if match > bound || bound > limit {
+			t.Errorf("robots %s: matching took %d steps, bound %d, cap %d", name, match, bound, limit)
+		}
+	}
+}
+
+// The link budget (C1201) leaves a page whose links write their URLs as it
+// was: every link of a long page is a link, also against a page URL with a
+// long query, which resolving does not read. A page that spends the budget
+// keeps the text of its later links.
+func TestHTMLLinkBudget(t *testing.T) {
+	var b strings.Builder
+	for i := range 40000 {
+		b.WriteString("<li><a href=\"/p/" + strconv.Itoa(i) + "\">item " + strconv.Itoa(i) + "</a></li>\n")
+	}
+	base := "https://site.example/list?" + strings.Repeat("q=1&", 400)
+	_, text := services.HTMLToTextForTest(b.String(), base)
+	if got := strings.Count(text, "](https://site.example/p/"); got != 40000 {
+		t.Errorf("%d of 40000 links kept as links", got)
+	}
+	if !strings.Contains(text, "[item 39999](https://site.example/p/39999)") {
+		t.Errorf("last link: %q", text[max(0, len(text)-200):])
+	}
+
+	hostile := strings.Repeat("<a href=(>", services.FetchBodyBytes/10-4) + "<p><a href=/x>the end</a>"
+	_, text = services.HTMLToTextForTest(hostile, "https://site.example/"+strings.Repeat("d", 1900)+"/")
+	if !strings.HasSuffix(text, "the end") || strings.Contains(text, "](") {
+		t.Errorf("past the budget: %q", text[max(0, len(text)-200):])
 	}
 }

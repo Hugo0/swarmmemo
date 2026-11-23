@@ -30,6 +30,7 @@ type robotsRules struct {
 	rules       []robotsRule
 	disallowAll bool
 	status      int // the 5xx robots.txt answered, when that set disallowAll
+	parseSteps  int // the work parseRobots did: each line's bytes, each agent and rule gathered
 }
 
 // parseRobots reads a robots.txt body for the product token agent
@@ -43,6 +44,7 @@ func parseRobots(body string, agent string) robotsRules {
 	var cur *group
 	lastWasAgent := false
 	total, kept := 0, 0
+	steps := 0
 	for len(body) > 0 {
 		line := body
 		if i := strings.IndexAny(body, "\r\n"); i >= 0 {
@@ -50,6 +52,7 @@ func parseRobots(body string, agent string) robotsRules {
 		} else {
 			body = ""
 		}
+		steps += len(line) + 1
 		if i := strings.IndexByte(line, '#'); i >= 0 {
 			line = line[:i]
 		}
@@ -88,6 +91,7 @@ func parseRobots(body string, agent string) robotsRules {
 	for _, g := range groups {
 		// A group's rules count once, however often it names an agent.
 		ours, all := false, false
+		steps += len(g.agents)
 		for _, a := range g.agents {
 			ours = ours || a == agent
 			all = all || a == "*"
@@ -95,15 +99,17 @@ func parseRobots(body string, agent string) robotsRules {
 		if ours {
 			mine = append(mine, g.rules...)
 			matched = true
+			steps += len(g.rules)
 		}
 		if all {
 			star = append(star, g.rules...)
+			steps += len(g.rules)
 		}
 	}
 	if matched {
-		return robotsRules{rules: mine}
+		return robotsRules{rules: mine, parseSteps: steps}
 	}
-	return robotsRules{rules: star}
+	return robotsRules{rules: star, parseSteps: steps}
 }
 
 // allowed reports whether path (with its query, starting with "/") may be
@@ -117,16 +123,26 @@ func (r robotsRules) allowed(path string) bool {
 // ("Disallow: /data/", sanitised by robotsLine); "" when no rule did (the
 // file could not be read, so everything is disallowed) or path is allowed.
 func (r robotsRules) decide(path string) (bool, string) {
+	ok, line, _ := r.decideSteps(path)
+	return ok, line
+}
+
+// decideSteps is decide with the steps its matches took, which
+// TestHTMLToTextIsLinear bounds by the cost the header above states.
+func (r robotsRules) decideSteps(path string) (bool, string, int) {
 	if r.disallowAll {
-		return false, ""
+		return false, "", 0
 	}
 	if path == "" {
 		path = "/"
 	}
 	best, allow := -1, true
 	var by robotsRule
+	steps := 0
 	for _, rule := range r.rules {
-		if !robotsMatch(rule.pattern, path) {
+		match, took := robotsMatch(rule.pattern, path)
+		steps += took
+		if !match {
 			continue
 		}
 		n := len(rule.pattern)
@@ -135,9 +151,9 @@ func (r robotsRules) decide(path string) (bool, string) {
 		}
 	}
 	if allow {
-		return true, ""
+		return true, "", steps
 	}
-	return false, robotsLine(by.pattern)
+	return false, robotsLine(by.pattern), steps
 }
 
 // robotsLineBytes bounds the robots.txt line a fetch_robots refusal names.
@@ -163,8 +179,9 @@ func robotsLine(pattern string) string {
 
 // robotsMatch matches a rule's pattern from the start of path: "*" is any
 // run of characters, and a "$" at the end anchors the end of the path.
-// Greedy with one backtrack point, so it is O(len(pattern)*len(path)).
-func robotsMatch(pattern, path string) bool {
+// Greedy with one backtrack point, so it is O(len(pattern)*len(path)):
+// steps counts its loops' turns.
+func robotsMatch(pattern, path string) (match bool, steps int) {
 	anchored := strings.HasSuffix(pattern, "$")
 	if anchored {
 		pattern = pattern[:len(pattern)-1]
@@ -172,6 +189,7 @@ func robotsMatch(pattern, path string) bool {
 	p, s := 0, 0
 	star, mark := -1, 0
 	for s < len(path) {
+		steps++
 		switch {
 		case p < len(pattern) && pattern[p] == '*':
 			star, mark = p, s
@@ -180,17 +198,18 @@ func robotsMatch(pattern, path string) bool {
 			p++
 			s++
 		case p == len(pattern) && !anchored:
-			return true // a prefix match
+			return true, steps // a prefix match
 		case star >= 0:
 			p = star + 1
 			mark++
 			s = mark
 		default:
-			return false
+			return false, steps
 		}
 	}
 	for p < len(pattern) && pattern[p] == '*' {
+		steps++
 		p++
 	}
-	return p == len(pattern)
+	return p == len(pattern), steps
 }

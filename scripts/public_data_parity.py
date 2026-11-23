@@ -13,6 +13,7 @@ booleans exactly. Keys only SwarmMemo has are listed as extras (a failure only
 with --strict-extra). A key the reference lacks, or holds as null, empty or
 false, matches a missing, null, empty or false SwarmMemo value. Provenance
 text (notes, source descriptions, fences) is ignored; --ignore adds patterns.
+Duplicate row keys in a keyed list are differences, on either side.
 
 Exit status: 0 when the values agree, 1 when they differ, 2 on bad input.
 Standard library only.
@@ -132,9 +133,20 @@ class Comparison:
         name = path.rsplit(".", 1)[-1].rstrip("#")
         keys = LIST_KEYS.get(name)
         if keys and all(isinstance(x, dict) for x in ref + got):
-            index = {tuple(x.get(k) for k in keys): x for x in got}
+            index = {}
+            for x in got:
+                k = tuple(x.get(k) for k in keys)
+                if k in index:
+                    self.diff(f"{path}#{list(k)}", None, [index[k], x], "duplicate key in swarmmemo")
+                else:
+                    index[k] = x
+            seen_ref = {}
             for x in ref:
                 k = tuple(x.get(k) for k in keys)
+                if k in seen_ref:
+                    self.diff(f"{path}#{list(k)}", [seen_ref[k], x], None, "duplicate key in reference")
+                else:
+                    seen_ref[k] = x
                 if k not in index:
                     self.diff(f"{path}#{list(k)}", x, None, "element missing in swarmmemo")
                     continue

@@ -59,6 +59,30 @@ func HTMLToTextForTest(doc, base string) (title, text string) {
 	return p.Title, p.Text
 }
 
+// HTMLToTextWorkForTest converts an HTML page and says the work it took
+// (convertHTML), for TestHTMLToTextIsLinear.
+func HTMLToTextWorkForTest(doc, base string) (text string, work int) {
+	u, _ := url.Parse(base)
+	p, work := convertHTML(doc, u)
+	return p.Text, work
+}
+
+// RobotsStepsForTest parses a robots.txt and decides path against it,
+// and says the steps each took, and the bound on the matches' steps:
+// (len(path)+2) × (len(pattern)+1) for each rule kept (robotsMatch).
+func RobotsStepsForTest(body, path string) (parse, match, matchBound int) {
+	r := parseRobots(body, FetchRobotsToken)
+	_, _, match = r.decideSteps(path)
+	for _, rule := range r.rules {
+		matchBound += (len(path) + 2) * (len(rule.pattern) + 1)
+	}
+	return r.parseSteps, match, matchBound
+}
+
+// RobotsPatternCapForTest bounds the sum of len(pattern)+1 over the rules
+// parseRobots keeps: its caps on their bytes and their count.
+const RobotsPatternCapForTest = robotsPatternBytes + robotsRulesMax
+
 // RobotsAllowedForTest parses a robots.txt for SwarmMemoFetch and asks
 // whether path is allowed.
 func RobotsAllowedForTest(body, path string) bool {

@@ -34,8 +34,11 @@ trap 'kill $SRVS 2>/dev/null' EXIT
 start_candidate() {
   local data=$1 port=$2; shift 2
   env "$@" NETWORK_RATE=100000/10000 GRAPH_UNIVERSE_TTL=60s DATA_DIR="$data" SERVICE_ID=swarmmemo.com ALLOW_INSECURE_LOCAL=true LISTEN_ADDR=127.0.0.1:$port "$BIN" > "$data.server.log" 2>&1 &
-  SRVS="$SRVS $!"
+  local pid=$!
+  SRVS="$SRVS $pid"
   for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:$port/api/messages?limit=1" >/dev/null && break; sleep 0.25; done
+  # The free port was closed before the server bound it: make sure the server that answered is ours.
+  python3 -B scripts/fixture_ports.py "$pid" "$port" || { echo "  FAIL fixture server on port $port is not ours (pid $pid)"; exit 1; }
   DATA_DIR=$data SERVICE_ID=swarmmemo.com "$BIN" params set posting "$S/posting.json" --reason "browser suite fixture" >/dev/null 2>&1 || echo "posting params not set ($port)"
 }
 

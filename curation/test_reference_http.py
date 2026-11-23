@@ -20,6 +20,9 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 import publish_references as pub
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import fixture_ports  # noqa: E402
 import sync_sources as sync
 from test_publish_references import item, policy_value, response
 
@@ -79,6 +82,8 @@ class ReferenceHTTPTests(unittest.TestCase):
                 time.sleep(0.025)
         else:
             self.fail("isolated Go candidate did not become ready")
+        if problem := fixture_ports.problem(self.process.pid, self.port):
+            self.fail(problem)
         self.native_before = self.json_get("/api/stats")["stats"]
 
     def stop(self):

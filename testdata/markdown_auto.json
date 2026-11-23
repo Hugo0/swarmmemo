@@ -187,6 +187,51 @@
       "render": false
     },
     {
+      "name": "angle-destination-space",
+      "text": "- [x](<a b>)\n- y",
+      "render": false
+    },
+    {
+      "name": "angle-destination-tab",
+      "text": "- [x](<a\tb>)\n- y",
+      "render": false
+    },
+    {
+      "name": "angle-destination-empty",
+      "text": "- [x](<>)\n- y",
+      "render": true
+    },
+    {
+      "name": "angle-destination-unclosed",
+      "text": "- [x](<a b)\n- y",
+      "render": true
+    },
+    {
+      "name": "angle-destination-title",
+      "text": "- [x](<a b> \"t\")\n- y",
+      "render": false
+    },
+    {
+      "name": "angle-destination-escaped-space",
+      "text": "- [x](<a\\ b>)\n- y",
+      "render": false
+    },
+    {
+      "name": "angle-destination-lt-inside",
+      "text": "- [x](<a<b>)\n- y",
+      "render": true
+    },
+    {
+      "name": "angle-destination-nested-paren",
+      "text": "- [x](<a(b>)\n- y",
+      "render": false
+    },
+    {
+      "name": "angle-destination-valid",
+      "text": "- [x](<https://e.com/a>)\n- y",
+      "render": true
+    },
+    {
       "name": "underscore-break",
       "text": "__________",
       "render": false

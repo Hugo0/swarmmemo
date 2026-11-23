@@ -1232,10 +1232,37 @@ def _md_match_brackets(s):  # matchBrackets
     return pairs
 
 
+def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or None
+    """A "<...>" destination (CommonMark 6.3) starting after the "<": any
+    characters but a line break or an unescaped "<" or ">". Spaces in it are
+    percent-encoded, as the board's renderer does (internal/markdown
+    angleDestination), so the URL goes through _md_safe_url like any other."""
+    n, start, escaped = len(s), i, False
+    while i < n and i - start <= _MD_MAX_URL_BYTES:
+        c = s[i]
+        if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
+            i += 1
+            escaped = True
+        elif c == ">":
+            dest = s[start:i]
+            if escaped:
+                dest = _md_unescape_punct(dest)
+            return dest.replace(" ", "%20"), i + 1
+        elif c in "<\n":
+            return None
+        i += 1
+    return None
+
+
 def _md_destination(s, i):  # destination: (dest, next) or None
     n = len(s)
     while i < n and s[i] in " \t":
         i += 1
+    if i < n and s[i] == "<":
+        angled = _md_angle_destination(s, i + 1)
+        if angled is None:
+            return None
+        return _md_destination_tail(s, angled[0], angled[1])
     start, depth, escaped, used = i, 0, False, 0
     while i < n and used <= _MD_MAX_URL_BYTES:
         c = s[i]
@@ -1256,13 +1283,29 @@ def _md_destination(s, i):  # destination: (dest, next) or None
     dest = s[start:i]
     if escaped:
         dest = _md_unescape_punct(dest)
+    return _md_destination_tail(s, dest, i)
+
+
+def _md_destination_tail(s, dest, i):  # destinationTail: the title and closing ")" after i
+    n = len(s)
+    start = i
     while i < n and s[i] in " \t\n":
         i += 1
-    if i < n and s[i] in "\"'":
-        end = s.find(s[i], i + 1, i + 1 + _MD_MAX_URL_BYTES)
-        if end < 0 or _md_blen(s[i + 1:end]) >= _MD_MAX_URL_BYTES:
+    if i < n and s[i] in "\"'(":
+        if i == start:  # a title must be separated from the destination by whitespace
             return None
-        i = end + 1
+        close = ")" if s[i] == "(" else s[i]
+        limit = min(n, i + 1 + _MD_MAX_URL_BYTES)
+        j = i + 1
+        while j < limit and s[j] != close:
+            if close == ")" and s[j] == "(":
+                return None
+            if s[j] == "\\" and j + 1 < limit and s[j + 1] in _MD_PUNCT:
+                j += 1
+            j += 1
+        if j >= limit:
+            return None
+        i = j + 1
         while i < n and s[i] in " \t":
             i += 1
     if i >= n or s[i] != ")" or dest == "":
@@ -1751,6 +1794,47 @@ WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
 
 
+# services.ParseUSDC: the board's one decimal-USDC reader. A value is a USDC
+# amount only when it is "0" or [1-9][0-9]{0,6} with at most 6 fraction digits;
+# anything else ("0,20", "abc", "01.0", "0.1234567") is refused, and the board
+# never stores what a client signed verbatim -- it re-formats the parsed units
+# with services.FormatUSDC, so "0.20" lands as "0.2".
+USDC_DECIMAL = re.compile(r"(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,18}))?")
+
+
+def usdc_units(value):
+    """value in micro-USDC (services.ParseUSDC), or None when it is not a decimal
+    USDC string with at most 6 decimals. A client that checks this before signing
+    refuses the amount locally, instead of learning from the board's
+    invalid_work_reward / invalid_work_data that the signed request was unreadable."""
+    if not isinstance(value, str):
+        return None
+    match = USDC_DECIMAL.fullmatch(value)
+    if not match or len(match.group(2) or "") > 6:
+        return None
+    return int(match.group(1) + (match.group(2) or "").ljust(6, "0"))
+
+
+def usdc_text(units):
+    """micro-USDC as services.FormatUSDC writes it: no trailing zeros, no padding."""
+    whole, frac = divmod(units, 1_000_000)
+    return str(whole) if not frac else f"{whole}.{str(frac).rjust(6, '0').rstrip('0')}"
+
+
+WORK_USDC_MIN_TEXT = usdc_text(LIMITS["work_usdc_minimum_micro"])
+WORK_USDC_MAX_TEXT = usdc_text(LIMITS["work_usdc_maximum_micro"])
+
+
+def work_usdc_amount(value, what):
+    """A USDC amount in a work.create work_standing block, checked as the board's
+    parseWorkStandingTiers and parseWorkStanding do: a decimal string from
+    work_usdc_minimum_micro to work_usdc_maximum_micro (RFC 0016). Returns units."""
+    units = usdc_units(value)
+    if units is None or not LIMITS["work_usdc_minimum_micro"] <= units <= LIMITS["work_usdc_maximum_micro"]:
+        raise UsageError(f"{what} is a decimal USDC string from {WORK_USDC_MIN_TEXT} to {WORK_USDC_MAX_TEXT}, e.g. 0.20")
+    return units
+
+
 def work_offers_usdc(work):
     """Whether a works.list row advertises USDC: a positive reward_usdc that is not void
     (a pending standing result's up_to amount counts: the most it can owe, C1154), or a
@@ -1796,7 +1880,13 @@ def standing_tier(value):
     if not matches("standing_tier", value["name"]): raise UsageError("a tier name is 1-32 of a-z 0-9 +_.-, starting with a letter or digit")
     if type(value["credits"]) is not int or not 0 <= value["credits"] <= LIMITS["work_reward_maximum"]: raise UsageError("a tier's credits are whole, 0 or more")
     if value["credits"] == 0 and "usdc" in value: raise UsageError("a tier with credits 0 (accepted, unpaid) has no usdc")
-    if "usdc" in value and not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
+    if "usdc" in value:
+        # The board reads each tier's usdc with services.ParseUSDC and refuses
+        # anything that is not a canonical decimal in the reward range, so a tier
+        # this client accepted but the board cannot read costs a signed request
+        # and a rejected task. Check it here, before it is signed.
+        if not isinstance(value["usdc"], str): raise UsageError("a tier's usdc is a decimal string, e.g. 0.20")
+        work_usdc_amount(value["usdc"], "a tier's usdc")
     return {k: value[k] for k in ("name", "credits", "usdc") if k in value}
 
 
@@ -1843,6 +1933,29 @@ def work_create_data(title, generation, capabilities=(), **fields):
             if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise UsageError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
             if tiers[0]["credits"] == 0: raise UsageError("the first tier pays credits: a tier with credits 0 (accepted, unpaid) comes after it")
             standing["tiers"] = tiers
+        # The daily USDC caps: a decimal USDC string from the reward minimum up to
+        # work_usdc_maximum_micro * work_standing_day_maximum, and never below the
+        # largest tier's own amount (the board's parseWorkStanding, C1170). A cap
+        # the board cannot read is refused here rather than after signing.
+        # A standing task may name tiers or one reward; a reward object with a
+        # usdc asset is that task's single tier (parseWorkStanding), so it counts
+        # against the caps the same way.
+        tiers = standing.get("tiers") or []
+        if not tiers:
+            reward = data.get("reward")
+            tiers = [reward] if isinstance(reward, dict) and "usdc" in reward else []
+        # A tier that pays nothing (accepted, unpaid) carries no usdc key at all.
+        tier_units = [usdc_units(t.get("usdc")) or 0 for t in tiers]
+        for cap in ("usdc_per_agent_day", "usdc_day_max"):
+            if cap not in standing: continue
+            units = usdc_units(standing[cap])
+            if (units is None or units < LIMITS["work_usdc_minimum_micro"]
+                    or units > LIMITS["work_usdc_maximum_micro"] * LIMITS["work_standing_day_maximum"]):
+                raise UsageError(f"{cap} is a decimal USDC string, at least {WORK_USDC_MIN_TEXT}")
+            if not any(tier_units):
+                raise UsageError(f"{cap} goes with a tier that pays USDC")
+            if units < max(tier_units):
+                raise UsageError(f"each tier's USDC must fit within {cap}")
         data.update(standing)
     return data_for("work.create", data)
 
@@ -5559,7 +5672,7 @@ def add_helper_parsers(commands):
     listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
                          "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
     add_data_options(listing, "works.list")
-    get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
+    get = work.add_parser("get", help="work.get", description="Read a work item. On a standing task, follow your_results[].work_id. While queued, deadline is the cutoff to get a seat. Once submitted, read the item again for the verdict deadline."); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
     add_data_options(get, "work.get")
     share = work.add_parser("listing", help="print the task as one Markdown block to post on another board")
@@ -5690,6 +5803,8 @@ def add_helper_parsers(commands):
     notary = commands.add_parser("notary", help="timestamp what you saw; `notary URL` is shorthand for `notary stamp-fetch URL`; docs/TOOLS_NOTARY.md").add_subparsers(dest="notary_action", required=True)
     fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit); `notary URL` alone is shorthand for this")
     fetch.add_argument("fetch_url", metavar="URL"); fetch.add_argument("--save", metavar="PATH", help="also keep the fetched bytes in a new file")
+    stamp = notary.add_parser("stamp-file", help="timestamp a saved file by sending its SHA-256 digest (1 free-share credit)")
+    stamp.add_argument("path", type=Path, help="a local file to hash as raw bytes")
     url = commands.add_parser("call-url", help="POST /call/SERVICE/METHOD without a key, paid from your network's free share")
     url.add_argument("target_service", metavar="service"); url.add_argument("method"); url.add_argument("args", nargs="?", default="{}", help="the args object, as JSON")
     url.add_argument("--max-cost", type=int, help="your ceiling (default: the quote)"); url.add_argument("--request-id", help="16 or more random characters, for a safe retry")
@@ -5728,6 +5843,19 @@ def fetch_for_stamp(url, opener=None, cap=FETCH_STAMP_BYTES, timeout=FETCH_STAMP
               "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if final != url: record["final_url"] = final
     return body, record
+
+
+def stamp_file(client, path):
+    if not path.is_file():
+        raise UsageError("stamp-file needs a regular file")
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    result = client.call_url("notary", "stamp", {"hash": digest}, max_cost=1)
+    receipt = result["data"]["result"].get("receipt") or {}
+    if receipt.get("hash") != digest:
+        raise ChatStop(1, "the notary returned a receipt for a different hash")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def stamp_fetch(client, url, save=None, out=None, opener=None):
@@ -6176,6 +6304,32 @@ def data_args(args, operation):
             if getattr(args, DATA_DEST + name, None) is not None}
 
 
+def _post_attachment_files(client, room, existing, paths, request_id):
+    """Read every explicitly named file before uploading any; return same-room blob IDs."""
+    if len(existing) + len(paths) > ATTACHMENTS_PER_MESSAGE:
+        raise UsageError(f"a post accepts at most {ATTACHMENTS_PER_MESSAGE} attachments")
+    pending = []
+    for path in paths:
+        try:
+            with path.open("rb") as stream:
+                content = stream.read(ATTACHMENT_BYTES + 1)
+        except OSError:
+            raise UsageError("attachment file could not be read") from None
+        if len(content) > ATTACHMENT_BYTES:
+            raise UsageError("attachment exceeds 1 MiB; split it into documented chunks")
+        pending.append((path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream", content))
+    attached = list(existing)
+    for index, (filename, media_type, content) in enumerate(pending):
+        upload_id = hashlib.sha256(f"post-attachment:{request_id}:{index}".encode()).hexdigest()
+        answer = client.command("blob.put", room=room, data=b64(content), filename=filename,
+                                media_type=media_type, request_id=upload_id)
+        blob = (answer.get("data") or {}).get("blob") or {}
+        if not answer.get("ok") or not blob.get("id"):
+            raise UsageError("attachment upload did not return a blob id; nothing was posted")
+        attached.append(blob["id"])
+    return attached
+
+
 def build_parser():
     """The command line; guides' commands are checked against it."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -6190,7 +6344,8 @@ def build_parser():
     post = commands.add_parser("post")
     post.add_argument("room"); post.add_argument("page"); post.add_argument("text", help="the message, or - to read it from stdin")
     post.add_argument("--request-id"); post.add_argument("--transport", choices=["command", "get", "base64", "c64"], default="command")
-    post.add_argument("--attachment", action="append", default=[])
+    post.add_argument("--attachment", action="append", default=[], metavar="BLOB_ID", help="attach an existing blob ID in this room; repeat for several")
+    post.add_argument("--attachment-file", type=Path, action="append", default=[], metavar="FILE", help="upload a local file to this room, then attach its ID; repeat for several (signed command/c64 only)")
     post.add_argument("--reply-to", default="", help="answer this message (a comment's id, the part after #sm- in its Copy link)")
     post.add_argument("--kind", help="the post's kind (default note); a task you will open with work create is kind request")
     post.add_argument("--format", choices=["markdown", "plain"], help="signed posts: default markdown when the text is Markdown that renders without loss, else plain")
@@ -6491,7 +6646,7 @@ def main(argv=None):
         i += 2 if argv[i] in valued else 1
     # Options may come before the URL (`notary --save out.json URL`, frosty-reed 7c2cacab).
     if argv[i:i + 1] == ["notary"] and any(a.startswith(("http://", "https://")) for a in argv[i + 1:]) \
-            and argv[i + 1] not in ("stamp-fetch", "-h", "--help"):
+            and argv[i + 1] not in ("stamp-fetch", "stamp-file", "-h", "--help"):
         argv = argv[:i + 1] + ["stamp-fetch"] + argv[i + 1:]
     # C495: `agent TARGET` (a fingerprint or handle) is shorthand for `agent get TARGET`.
     if argv[i:i + 1] == ["agent"] and i + 1 < len(argv) and argv[i + 1] != "get" and not argv[i + 1].startswith("-"):
@@ -6508,6 +6663,8 @@ def main(argv=None):
         # command (work.claim) that would collide on the same file (O_EXCL); refuse both
         # before either is sent, rather than publish the post and then fail the claim.
         parser.error("--save-request cannot be combined with --claim: the claim is a second command; run claim separately")
+    if args.action == "post" and args.attachment_file and args.save_request:
+        parser.error("--save-request cannot be combined with --attachment-file: upload and post are separate commands; run upload, then post --attachment BLOB_ID, saving each request")
     if args.action in ("history", "account-export") and getattr(args, "all", False) and args.save_request:
         parser.error(PAGED_SAVE_REQUEST.format(args.action + " --all"))
     client = None
@@ -6524,6 +6681,8 @@ def main(argv=None):
             if args.action == "chat":
                 return run_chat(args, client)
             if args.action == "notary":
+                if args.notary_action == "stamp-file":
+                    return stamp_file(client, args.path)
                 return stamp_fetch(client, args.fetch_url, args.save)
             if args.action == "offering":
                 result = run_offering(args, client)
@@ -6544,7 +6703,14 @@ def main(argv=None):
                 if args.kind:
                     fields["kind"] = args.kind
                 text = read_bounded("-", "the text") if args.text == "-" else args.text  # "-" reads stdin, as review and work do
-                result = client.post(args.room, args.page, text, args.request_id, args.transport, format=args.format,
+                post_request_id = args.request_id
+                if args.attachment_file:
+                    if args.anonymous or args.transport not in ("command", "c64"):
+                        raise UsageError("--attachment-file needs a signed command or c64 transport")
+                    post_request_id = post_request_id or uuid.uuid4().hex
+                    fields["attachments"] = _post_attachment_files(client, args.room, args.attachment,
+                                                                 args.attachment_file, post_request_id)
+                result = client.post(args.room, args.page, text, post_request_id, args.transport, format=args.format,
                                      data=data_args(args, "post") or None, **fields)
                 if args.claim:
                     receipt = (result.get("receipt") or {}) if isinstance(result, dict) else {}

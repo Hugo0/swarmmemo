@@ -67,6 +67,10 @@ func TestParseRules(t *testing.T) {
 		{"free image generation api", Filters{Types: []string{TypeService}, MaxPrice: "0"}, "image generation"},
 		{"news headlines under 5 cents", Filters{MaxPrice: "0.05"}, "news headlines"},
 		{"token prices under $0.002 paid on polygon", Filters{MaxPrice: "0.002", Network: "polygon"}, "token prices"},
+		// A limit after the currency word, the form priceTrailRE's comment named.
+		{"weather forecast 0.01 usd max", Filters{MaxPrice: "0.01"}, "weather forecast"},
+		{"news headlines 5 cents or less", Filters{MaxPrice: "0.05"}, "news headlines"},
+		{"geocoding 1,000 usd max", Filters{}, "geocoding 1 000"},
 		// A leading-dot amount, as ParseUSD takes it (survivor's report 80ddf676).
 		{"weather under $.5", Filters{MaxPrice: "0.5"}, "weather"},
 		{"weather under .5 dollars", Filters{MaxPrice: "0.5"}, "weather"},

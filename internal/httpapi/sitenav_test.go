@@ -106,6 +106,7 @@ func TestSiteNavMovesLand(t *testing.T) {
 		"/prices":                 "/trust?x=1#allowance",
 		"/policy":                 "/terms?x=1#board-rules",
 		"/migration":              "/glossary?x=1#renamed",
+		"/about":                  "/faq?x=1",
 		"/trust/network":          "/agents/network?x=1",
 		"/graph":                  "/swarmchasing?x=1",
 		"/graph/x":                "/swarmchasing?x=1",
@@ -348,7 +349,7 @@ func TestSiteNavGeneratedSurfaces(t *testing.T) {
 	if len(locs) < len(fixed) || !slices.Equal(locs[:len(fixed)], fixed) {
 		t.Errorf("sitemap fixed part differs from the table:\n%v\n%v", locs, fixed)
 	}
-	for _, gone := range []string{"/limits", "/policy", "/migration", "/me", "/trust/network"} {
+	for _, gone := range []string{"/limits", "/policy", "/migration", "/about", "/me", "/trust/network"} {
 		if slices.Contains(locs, gone) {
 			t.Errorf("sitemap offers %s", gone)
 		}

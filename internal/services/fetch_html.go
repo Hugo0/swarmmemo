@@ -15,7 +15,7 @@ import (
 // code in backticks, links as [text](absolute url)) and drops scripts,
 // styles, templates, embedded objects and the page's navigation chrome.
 // Every loop advances through the input, so the work is linear in its size
-// (at most FetchBodyBytes).
+// (at most FetchBodyBytes); convertHTML counts it.
 
 // FetchHTMLKept and FetchHTMLDropped are what a fetched HTML page keeps and
 // drops, as every page and document that describes fetch says it
@@ -80,6 +80,19 @@ var blockElements = map[string]bool{
 // kept, so a long skipped prefix (scripts, styles, navigation) costs nothing.
 const htmlTextLimit = FetchOffsetMax
 
+// Resolving a link reads the page's URL (up to a few KiB), and when its
+// target is refused, its label is empty or its target is shorter than the
+// URL, it writes less than it read, so htmlTextLimit does not bound that
+// work (C1201: 4 MiB of <a href=(> took 8 s). Each resolution is charged
+// what it reads, less what its link writes; once a conversion's charge
+// would pass htmlLinkWastePerByte per byte of page plus htmlLinkWasteBase,
+// the rest of the page's links are kept as their text alone. A page whose
+// links write their URLs never gets near it.
+const (
+	htmlLinkWastePerByte = 4
+	htmlLinkWasteBase    = 1 << 20
+)
+
 // pageText is a page converted: its title and its text as Markdown.
 type pageText struct {
 	Title string
@@ -89,14 +102,35 @@ type pageText struct {
 // htmlToText converts an HTML document (valid UTF-8) to Markdown text.
 // base resolves relative links; nil drops them.
 func htmlToText(doc string, base *url.URL) pageText {
-	w := &mdWriter{base: base}
+	p, _ := convertHTML(doc, base)
+	return p
+}
+
+// convertHTML is htmlToText with the work it did: one per step of its
+// loop, plus every byte its searches and its text handling looked at, plus
+// the base URL's length for each link it resolved. The count is what
+// TestHTMLToTextIsLinear bounds, so the linear claim above is checked by
+// counting, on any machine, not by a clock.
+func convertHTML(doc string, base *url.URL) (pageText, int) {
+	w := &mdWriter{base: base, wasteMax: htmlLinkWastePerByte*len(doc) + htmlLinkWasteBase}
+	if base != nil {
+		// What resolving a link against base reads: not its query or
+		// fragment, which only an href with no path and no query (such as
+		// "//") keeps, and then its link writes them.
+		b := *base
+		b.RawQuery, b.ForceQuery, b.Fragment, b.RawFragment = "", false, "", ""
+		w.baseLen = len(b.String())
+	}
+	work := 0
 	var title strings.Builder
 	skip := 0           // depth inside skipped elements
 	skipName := ""      // the outermost skipped element
 	skipChrome := false // it is page chrome: navigation, a footer, a sidebar
 	i := 0
 	for i < len(doc) && w.b.Len() < htmlTextLimit {
+		work++
 		lt := strings.IndexByte(doc[i:], '<')
+		work += scanned(doc[i:], lt, 1)
 		if lt < 0 {
 			if skip == 0 {
 				w.text(doc[i:])
@@ -114,6 +148,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 		switch {
 		case strings.HasPrefix(rest, "<!--"):
 			end := strings.Index(rest[4:], "-->")
+			work += 4 + scanned(rest[4:], end, 3)
 			if end < 0 {
 				i = len(doc)
 			} else {
@@ -122,6 +157,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 			continue
 		case strings.HasPrefix(rest, "<![CDATA["):
 			end := strings.Index(rest, "]]>")
+			work += scanned(rest, end, 3)
 			if end < 0 {
 				i = len(doc)
 			} else {
@@ -133,6 +169,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 			continue
 		case strings.HasPrefix(rest, "<!") || strings.HasPrefix(rest, "<?"):
 			end := strings.IndexByte(rest, '>')
+			work += scanned(rest, end, 1)
 			if end < 0 {
 				i = len(doc)
 			} else {
@@ -140,7 +177,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 			}
 			continue
 		}
-		name, attrs, closing, selfClosing, n := parseTag(rest)
+		name, attrs, closing, selfClosing, n := parseTag(rest, &work)
 		if n == 0 {
 			// Not a tag: a literal '<'.
 			if skip == 0 {
@@ -164,12 +201,14 @@ func htmlToText(doc string, base *url.URL) pageText {
 			continue
 		}
 		if rawTextElements[name] && !selfClosing {
-			end := indexCloseTag(doc[i:], name)
+			end := indexCloseTag(doc[i:], name, &work)
 			body := doc[i:]
 			if end >= 0 {
 				body = doc[i : i+end]
 				i += end
-				if gt := strings.IndexByte(doc[i:], '>'); gt >= 0 {
+				gt := strings.IndexByte(doc[i:], '>')
+				work += scanned(doc[i:], gt, 1)
+				if gt >= 0 {
 					i += gt + 1
 				} else {
 					i = len(doc)
@@ -179,6 +218,7 @@ func htmlToText(doc string, base *url.URL) pageText {
 			}
 			switch {
 			case name == "title" && title.Len() == 0:
+				work += len(body)
 				title.WriteString(collapseSpace(html.UnescapeString(body)))
 			case name == "textarea" && skip == 0:
 				w.text(body)
@@ -214,7 +254,16 @@ func htmlToText(doc string, base *url.URL) pageText {
 	if len(t) > 300 {
 		t = truncateUTF8(t, 300)
 	}
-	return pageText{Title: t, Text: text}
+	return pageText{Title: t, Text: text}, work + w.work
+}
+
+// scanned is the bytes a search of s looked at that found a match of
+// length m at i: up to the match's end, or all of s when i < 0.
+func scanned(s string, i, m int) int {
+	if i < 0 {
+		return len(s)
+	}
+	return i + m
 }
 
 // voidElements never have content or a closing tag.
@@ -224,8 +273,8 @@ var voidElements = map[string]bool{"area": true, "base": true, "br": true, "col"
 // parseTag reads a tag at the start of s ("<a href=x>", "</p>", "<br/>"):
 // its lowercase name, its attributes (only href and the like are used),
 // whether it closes or closes itself, and its length; n is 0 when s does
-// not start a tag.
-func parseTag(s string) (name string, attrs map[string]string, closing, selfClosing bool, n int) {
+// not start a tag. It adds the bytes it looked at to work.
+func parseTag(s string, work *int) (name string, attrs map[string]string, closing, selfClosing bool, n int) {
 	i := 1
 	if i < len(s) && s[i] == '/' {
 		closing = true
@@ -236,6 +285,7 @@ func parseTag(s string) (name string, attrs map[string]string, closing, selfClos
 		i++
 	}
 	if i == start || !isASCIILetter(s[start]) {
+		*work += i
 		return "", nil, false, false, 0
 	}
 	name = strings.ToLower(s[start:i])
@@ -243,6 +293,7 @@ func parseTag(s string) (name string, attrs map[string]string, closing, selfClos
 		c := s[i]
 		switch {
 		case c == '>':
+			*work += i + 1
 			return name, attrs, closing, selfClosing, i + 1
 		case c == '/':
 			selfClosing = true
@@ -269,6 +320,7 @@ func parseTag(s string) (name string, attrs map[string]string, closing, selfClos
 					q := s[i]
 					end := strings.IndexByte(s[i+1:], q)
 					if end < 0 {
+						*work += len(s)
 						return name, attrs, closing, selfClosing, len(s)
 					}
 					val = s[i+1 : i+1+end]
@@ -294,6 +346,7 @@ func parseTag(s string) (name string, attrs map[string]string, closing, selfClos
 			}
 		}
 	}
+	*work += len(s)
 	return name, attrs, closing, selfClosing, len(s)
 }
 
@@ -303,14 +356,17 @@ func isNameByte(c byte) bool {
 	return isASCIILetter(c) || c >= '0' && c <= '9' || c == '-' || c == ':' || c == '_'
 }
 
-// indexCloseTag finds "</name" (any case) in s, or -1.
-func indexCloseTag(s, name string) int {
+// indexCloseTag finds "</name" (any case) in s, or -1. It adds the bytes
+// it looked at to work.
+func indexCloseTag(s, name string, work *int) int {
 	for i := 0; i+2+len(name) <= len(s); {
 		j := strings.Index(s[i:], "</")
+		*work += scanned(s[i:], j, 2)
 		if j < 0 {
 			return -1
 		}
 		k := i + j
+		*work += len(name) // the comparison below
 		if k+2+len(name) <= len(s) && strings.EqualFold(s[k+2:k+2+len(name)], name) {
 			end := k + 2 + len(name)
 			if end == len(s) || !isNameByte(s[end]) {
@@ -326,6 +382,11 @@ func indexCloseTag(s, name string) int {
 // blank lines between blocks, at most one blank line in a row.
 type mdWriter struct {
 	base     *url.URL
+	baseLen  int // what resolving a link against base reads (convertHTML)
+	work     int // what convertHTML counts: the bytes text, links and finish looked at
+	waste    int // link resolutions' charge: what they read less what their links wrote
+	wasteMax int // the most waste may reach; links past it are kept as text
+	linkCost int // the open link's resolution charge, refunded by what it writes
 	b        strings.Builder
 	pre      int    // depth inside <pre>
 	listPfx  string // the pending list-item or heading prefix
@@ -346,6 +407,7 @@ func (w *mdWriter) out() *strings.Builder {
 }
 
 func (w *mdWriter) text(raw string) {
+	w.work += len(raw)
 	s := html.UnescapeString(raw)
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, "\uFFFD")
@@ -474,10 +536,19 @@ func (w *mdWriter) open(name string, attrs map[string]string) {
 		if w.inLink {
 			return
 		}
-		target := resolveLink(w.base, attrs["href"])
+		href := linkHref(attrs["href"])
+		w.work += len(attrs["href"])
+		cost := len(href) + w.baseLen
+		if href == "" || w.waste+cost > w.wasteMax {
+			return // no link, or the resolution budget is spent: its text alone
+		}
+		w.work += w.baseLen
+		w.waste += cost
+		target := resolveLink(w.base, href)
 		if target == "" {
 			return
 		}
+		w.linkCost = cost
 		if w.space && w.lineDone {
 			w.b.WriteByte(' ')
 			w.space = false
@@ -485,6 +556,7 @@ func (w *mdWriter) open(name string, attrs map[string]string) {
 		w.inLink, w.link = true, target
 		w.linkText.Reset()
 	case "img":
+		w.work += len(attrs["alt"])
 		if alt := collapseSpace(attrs["alt"]); alt != "" {
 			w.text(" [image: " + alt + "] ")
 		}
@@ -502,6 +574,7 @@ func (w *mdWriter) close(name string) {
 			return
 		}
 		w.inLink = false
+		w.work += w.linkText.Len()
 		label := collapseSpace(w.linkText.String())
 		if label == "" {
 			return
@@ -512,7 +585,9 @@ func (w *mdWriter) close(name string) {
 		} else if w.space && w.lineDone {
 			w.b.WriteByte(' ')
 		}
-		w.b.WriteString("[" + strings.NewReplacer("[", "(", "]", ")").Replace(label) + "](" + w.link + ")")
+		md := "[" + strings.NewReplacer("[", "(", "]", ")").Replace(label) + "](" + w.link + ")"
+		w.b.WriteString(md)
+		w.waste -= min(w.linkCost, len(md))
 		w.lineDone, w.space = true, false
 	case "pre":
 		if w.pre > 0 {
@@ -570,6 +645,7 @@ func (w *mdWriter) mark(m string, opening bool) {
 func (w *mdWriter) finish() string {
 	if w.inLink {
 		w.inLink = false
+		w.work += w.linkText.Len()
 		w.b.WriteString(collapseSpace(w.linkText.String()))
 	}
 	if w.pre > 0 {
@@ -577,6 +653,7 @@ func (w *mdWriter) finish() string {
 	} else if w.code > 0 {
 		w.b.WriteString("`")
 	}
+	w.work += w.b.Len()
 	lines := strings.Split(w.b.String(), "\n")
 	out := make([]string, 0, len(lines))
 	blank := 0
@@ -599,8 +676,8 @@ func (w *mdWriter) finish() string {
 // resolveLink is href as an absolute http(s) URL, or "" for anything else
 // (javascript:, data:, mailto:, a fragment alone).
 func resolveLink(base *url.URL, href string) string {
-	href = strings.TrimSpace(href)
-	if href == "" || strings.HasPrefix(href, "#") || len(href) > 2048 {
+	href = linkHref(href)
+	if href == "" {
 		return ""
 	}
 	u, err := url.Parse(href)
@@ -619,6 +696,16 @@ func resolveLink(base *url.URL, href string) string {
 		return ""
 	}
 	return s
+}
+
+// linkHref is href as resolveLink parses it, or "" for one it drops
+// unparsed: empty, a fragment alone, or over 2048 bytes.
+func linkHref(href string) string {
+	href = strings.TrimSpace(href)
+	if href == "" || strings.HasPrefix(href, "#") || len(href) > 2048 {
+		return ""
+	}
+	return href
 }
 
 func collapseSpace(s string) string { return strings.Join(strings.FieldsFunc(s, isSpace), " ") }

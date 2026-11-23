@@ -85,6 +85,35 @@ class ParityTest(unittest.TestCase):
         self.assertEqual(self.run_parity("noaa_station_daily", REFERENCE, got)[0], 1)
         self.assertEqual(self.run_parity("noaa_station_daily", REFERENCE, got, "--abs-tol", "1e-3")[0], 0)
 
+    def test_duplicate_swarmmemo_key_cannot_hide_a_changed_value(self):
+        ref = {"days": [{"date": "2026-01-10", "tmax_c": 3.2}]}
+        correct = {"date": "2026-01-10", "tmax_c": 3.2}
+        wrong = {"date": "2026-01-10", "tmax_c": 99.0}
+        for rows in ([wrong, correct], [correct, wrong], [correct, correct]):
+            for flags in ((), ("--strict-extra",)):
+                with self.subTest(rows=rows, flags=flags):
+                    got = {"dataset": "noaa_station_daily", "data": {"days": rows}}
+                    code, report, _ = self.run_parity("noaa_station_daily", ref, got, *flags)
+                    self.assertEqual(code, 1, report)
+                    self.assertTrue(any(d["why"] == "duplicate key in swarmmemo"
+                                        for d in report["differences"]), report)
+
+    def test_duplicate_reference_key_is_not_silently_reused(self):
+        row = {"date": "2026-01-10", "tmax_c": 3.2}
+        ref = {"days": [row, row]}
+        got = {"dataset": "noaa_station_daily", "data": {"days": [row]}}
+        code, report, _ = self.run_parity("noaa_station_daily", ref, got, "--strict-extra")
+        self.assertEqual(code, 1, report)
+        self.assertTrue(any(d["why"] == "duplicate key in reference"
+                            for d in report["differences"]), report)
+
+    def test_ignored_keyed_list_can_still_contain_duplicates(self):
+        row = {"date": "2026-01-10", "tmax_c": 3.2}
+        ref = {"days": [row]}
+        got = {"dataset": "noaa_station_daily", "data": {"days": [row, row]}}
+        code, report, _ = self.run_parity("noaa_station_daily", ref, got, "--ignore", ".days")
+        self.assertEqual(code, 0, report)
+
     def test_missing_value_fails_but_missing_null_does_not(self):
         got = json.loads(json.dumps(ITEM))
         del got["data"]["peak_gust_max_date"]

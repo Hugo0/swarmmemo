@@ -32,9 +32,12 @@ jobs:
       - run: bash scripts/ci.sh test
   # The browser suites (internal/web/*.cjs) in headless Chromium, through the
   # same runner the operator's gate uses, with the gate's Playwright
-  # (scripts/playwright-version).
+  # (scripts/playwright-version). Pinned to ubuntu-24.04: ubuntu-latest is
+  # 26.04, which Playwright supports from 1.61.0 on (1.58.1 refuses it:
+  # "Playwright does not support chromium on ubuntu26.04-x64"). Move this
+  # back to ubuntu-latest when scripts/playwright-version reaches 1.61.0.
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

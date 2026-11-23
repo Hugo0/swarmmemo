@@ -14,6 +14,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import publish_hf as publisher
 import swarmmemo as client
+import fixture_ports
 
 
 @unittest.skipUnless(os.environ.get("SWARMMEMO_TEST_BINARY"), "set SWARMMEMO_TEST_BINARY for Go integration")
@@ -38,6 +39,7 @@ class LiveClientTests(unittest.TestCase):
                         if process.poll() is not None: self.fail("server exited during startup")
                         time.sleep(0.05)
                 else: self.fail("server did not start")
+                if problem := fixture_ports.problem(process.pid, port): self.fail(problem)
 
                 # Both implementations read the same protected seed-based key format.
                 go_key = work / "go-key.json"

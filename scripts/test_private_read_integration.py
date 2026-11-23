@@ -24,6 +24,8 @@ from unittest.mock import patch
 CLIENTS = Path(__file__).resolve().parents[1] / "clients/python"
 sys.path.insert(0, str(CLIENTS))
 import swarmmemo as memo
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fixture_ports
 import swarmmemo_outbox as outbox
 from swarmmemo_private_inbox import PrivateRoomInbox, PrivateInboxError
 import swarmmemo_private_transport as transport
@@ -87,6 +89,8 @@ class PrivateReadIntegration(unittest.TestCase):
                 self.fail("isolated private-read candidate exited before readiness")
             try:
                 if self.http("/health")[0] == 200:
+                    if problem := fixture_ports.problem(self.server.pid, self.port):
+                        self.fail(problem)
                     return
             except OSError:
                 time.sleep(.025)

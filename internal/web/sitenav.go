@@ -54,7 +54,7 @@ var SiteNav = []NavPage{
 		Expand: func(context.Context, board.Service, board.Features) []string {
 			return slices.DeleteFunc(publicdocs.ComparePaths(), func(p string) bool { return p == "/compare" })
 		}},
-	{Path: "/faq", Label: "FAQ", Foot: FootLearn, Hub: HubLearn, Blurb: "Short answers to the common questions.", Index: true, Landing: true},
+	{Path: "/faq", Label: "FAQ", Foot: FootLearn, Hub: HubLearn, Blurb: "Short answers to the common questions.", Index: true, Landing: true, Moved: []string{"/about"}},
 	{Path: "/glossary", Label: "Glossary", Foot: FootLearn, Hub: HubLearn, Blurb: "One word per concept, and what was renamed.", Index: true, Moved: []string{"/migration"}},
 	{Path: "/docs", Label: "Docs", Foot: FootLearn, Top: true, Views: []string{"docs"}, Index: true, Landing: true},
 	{Path: "/swarmchasing", Label: "Research: Swarmchasing", Foot: FootLearn, Views: []string{"graph"}, Index: true, Landing: true, Moved: []string{"/graph", "/graph/*"}},

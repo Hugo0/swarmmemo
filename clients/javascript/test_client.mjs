@@ -591,6 +591,22 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   assert.deepEqual(workCreateData({title: 't', generation: 'g', seats: 2, tiers: ['bug:5', 'valid-negative:0']}).tiers, [{name: 'bug', credits: 5}, {name: 'valid-negative', credits: 0}]);
   for (const tiers of [['valid-negative:0', 'bug:5'], ['a:0', 'b:0'], ['bug:5', {name: 'x', credits: 0, usdc: '0.10'}]])
     assert.throws(() => workCreateData({title: 't', generation: 'g', seats: 2, tiers}), errorCode('invalid_option'), JSON.stringify(tiers));
+  // C1220: a tier's usdc is the board's services.ParseUSDC decimal, in the
+  // reward range. Before this check the client signed whatever string it was
+  // handed, so the board refused the whole work.create with invalid_work_data.
+  for (const usdc of ['0,20', 'abc', '01.0', '0.1234567', '', ' 0.20', '0.20 ', '.20', '1e-2', '-0.20', '0.001', '1000.01', '2000'])
+    assert.throws(() => standingTier({name: 'bug', credits: 500, usdc}), errorCode('invalid_option'), JSON.stringify(usdc));
+  for (const usdc of ['0.01', '0.20', '0.123456', '1000']) assert.equal(standingTier({name: 'bug', credits: 500, usdc}).usdc, usdc);
+  // parseWorkStanding (C1170): the daily caps are decimal USDC from the minimum
+  // up to the reward maximum times the day maximum, they need a tier that pays
+  // USDC, and no tier may exceed them. None of that was checked before signing.
+  const paying = {credits: 100, usdc: '0.20'};
+  for (const bad of [{reward: paying, usdcPerAgentDay: 'abc'}, {reward: paying, usdcDayMax: '0,20'}, {reward: paying, usdcPerAgentDay: '0.005'},
+    {reward: paying, usdcPerAgentDay: '0.10'}, {reward: paying, usdcDayMax: '0.15'}, {reward: paying, usdcDayMax: '1000001'},
+    {reward: {credits: 100}, usdcPerAgentDay: '0.20'}, {usdcPerAgentDay: '0.20'}])
+    assert.throws(() => workCreateData({title: 't', generation: 'g', seats: 2, ...bad}), errorCode('invalid_option'), JSON.stringify(bad));
+  assert.equal(workCreateData({title: 't', generation: 'g', seats: 2, reward: paying, usdcPerAgentDay: '0.20', usdcDayMax: '0.40'}).usdc_per_agent_day, '0.20');
+  assert.equal(workCreateData({title: 't', generation: 'g', seats: 2, tiers: ['bug:300:0.20', 'bug+fix:500:0.40'], usdcPerAgentDay: '0.40', usdcDayMax: '2.00'}).usdc_day_max, '2.00');
   assert.equal(requests.length, 0);
   // work.cancel closes a standing task early (C346), signing its reason and the generation.
   await signed.cancelWork(id, 'closed: enough results', {generation, requestId: 'c-1'});
@@ -914,7 +930,10 @@ test('C343: optional real Go board verifies linkWallet in one step', {skip: !pro
 const P = {generation: 'a'.repeat(32), message: 'b'.repeat(32), agent: 'c'.repeat(64), tx: '0x' + 'd'.repeat(64), room: '~' + 'a'.repeat(26)};
 const PATTERN_SAMPLES = {work_id: 'e'.repeat(32), message_id: 'e'.repeat(32), fingerprint: 'f'.repeat(64), tx_hash: P.tx, standing_tier: 'bug'};
 const FIELD_SAMPLES = {checks: [{property: 'tests', state: 'pass'}], tiers: [{name: 'bug', credits: 5}], capabilities: ['review'], ids: [P.message],
-  payout_address: '0x' + 'ab'.repeat(20), review: {subject: 'site:https://example.org/', verdict: 'good'}};
+  payout_address: '0x' + 'ab'.repeat(20), review: {subject: 'site:https://example.org/', verdict: 'good'},
+  // A USDC amount is the board's decimal (services.ParseUSDC), not any string:
+  // the default 'x1' sample would be a request the board refuses.
+  usdc_per_agent_day: '0.10', usdc_day_max: '0.10'};
 const camelName = name => name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 function dataSample(operation, name) {
   const field = CONTRACT.operations[operation].data.fields[name], kind = field.type.split('|')[0];
@@ -961,7 +980,9 @@ const JS_ARGUMENTS = {
   'work.accept review': () => ({rating: 80}), 'find type': v => ({types: v}),
   'work.create per_agent_day': v => ({seats: 2, perAgentDay: v}), 'work.create day_max': v => ({seats: 2, dayMax: v}), 'work.create windows': v => ({seats: 2, windows: v}),
   'work.create results_max': v => ({seats: 2, resultsMax: v}), 'work.create per_agent_max': v => ({seats: 2, perAgentMax: v}), 'work.create per_agent_cooldown_days': v => ({seats: 2, perAgentCooldownDays: v}), 'work.create tiers': v => ({seats: 2, tiers: v}),
-  'work.create usdc_per_agent_day': v => ({seats: 2, reward: 5, usdcPerAgentDay: v}), 'work.create usdc_day_max': v => ({seats: 2, reward: 5, usdcDayMax: v}),
+  // A USDC cap needs a tier that pays USDC (parseWorkStanding, C1170): the board
+  // refuses a cap beside a credits-only reward, so the sample reward pays USDC.
+  'work.create usdc_per_agent_day': v => ({seats: 2, reward: {credits: 5, usdc: v}, usdcPerAgentDay: v}), 'work.create usdc_day_max': v => ({seats: 2, reward: {credits: 5, usdc: v}, usdcDayMax: v}),
   'updates.mark_read all': () => ({all: true}),
 };
 // A field a wrapper does not send ('operation field'), with the reason.
@@ -1089,30 +1110,33 @@ test('dataFor checks names, types and enums against the contract; the audit gaps
 });
 
 test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (carlita-bounty-agent bf5e187d)', async t => {
-  const works = [
-    {id: 'credit-paid', reward: {amount: 100, state: 'paid'}},
-    {id: 'cash-promised', reward_usdc: {amount: '0.02', state: 'promised'}},
-    {id: 'conditional', standing: {tiers: [{name: 'a', credits: 20}, {name: 'b', credits: 60, usdc: '0.05'}]}},
-    {id: 'cash-void', reward_usdc: {amount: '0.05', state: 'void'}},
-    {id: 'up-to', reward_usdc: {amount: '0.40', up_to: true, state: 'promised'}}, // C1154: a pending standing result
-    {id: 'smallest', reward_usdc: {amount: '0.000001', state: 'payable'}},
-    ...['0', '0.000000', 'NaN', '-1', '1e3', '0.0000001', true, 1, null].map(amount => ({id: 'bad', reward_usdc: {amount}})),
-    {id: 'bad', standing: {tiers: [{usdc: '0.00'}, {usdc: 5}]}}, 'not-a-row',
-  ];
-  const page = {ok: true, data: {works, has_more: true, cursor: 'next-page', usdc_next: [{id: 'later'}]}};
+  const fixture = new URL('../../testdata/work_usdc_cursor.json', import.meta.url);
+  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds} =
+    JSON.parse(await readFile(fixture, 'utf8'));
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {
     if (body) sent.push(JSON.parse(body));
-    return new Response(JSON.stringify(page), {status: 200, headers: {'Content-Type': 'application/json'}});
+    const command = sent.at(-1);
+    let result = page;
+    if (command?.limit === 1) result = command.cursor === creditsOnly.next_cursor ? lastPage : creditsOnly;
+    return new Response(JSON.stringify(result), {status: 200, headers: {'Content-Type': 'application/json'}});
   };
   t.after(() => {globalThis.fetch = original;});
   const client = new Client({origin: 'https://example.org', anonymous: true});
   const got = await client.works({kind: 'rewarded', usdcOnly: true});
-  assert.deepEqual(got.data.works.map(w => w.id), ['cash-promised', 'conditional', 'up-to', 'smallest']);
+  assert.deepEqual(got.data.works.map(w => w.id), filterKeptIds);
+  assert.equal(got.next_cursor, page.next_cursor);
   assert.deepEqual({...got.data, works: undefined}, {...page.data, works: undefined});
   // The filter is local: the board gets the same works.list as without the flag.
   assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
-  assert.equal((await client.works({kind: 'rewarded'})).data.works.length, works.length);
+  const empty = await client.works({kind: 'rewarded', limit: 1, usdcOnly: true});
+  assert.deepEqual(empty.data.works, []);
+  assert.equal(empty.data.has_more, true);
+  assert.equal(empty.next_cursor, creditsOnly.next_cursor);
+  const continued = await client.works({kind: 'rewarded', limit: 1, cursor: empty.next_cursor, usdcOnly: true});
+  assert.equal(sent.at(-1).cursor, creditsOnly.next_cursor);
+  assert.deepEqual(continued, lastPage);
+  assert.equal((await client.works({kind: 'rewarded'})).data.works.length, page.data.works.length);
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
   assert.equal(workOffersUSDC('x'), false);

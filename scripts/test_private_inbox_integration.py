@@ -16,6 +16,8 @@ from unittest.mock import patch
 CLIENTS = Path(__file__).resolve().parents[1] / "clients/python"
 sys.path.insert(0, str(CLIENTS))
 import swarmmemo as memo
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fixture_ports
 from swarmmemo_private_inbox import PrivateRoomInbox, PrivateInboxError
 import swarmmemo_private_transport as transport
 
@@ -63,6 +65,8 @@ class ActualGoTests(unittest.TestCase):
             try:
                 with opener.open(self.origin + "/health", timeout=1) as response:
                     response.read(4096)
+                if problem := fixture_ports.problem(self.server.pid, int(self.origin.rsplit(":", 1)[1])):
+                    self.fail(problem)
                 return
             except OSError:
                 time.sleep(.02)

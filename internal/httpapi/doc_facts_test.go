@@ -241,6 +241,8 @@ func docFacts() []docFact {
 		{"docs/PROTOCOL.md", "searches about {N} paid-API endpoints", services.X402ToolsApprox},
 		{"docs/PROTOCOL.md", "Values are whole credits from 0 to {N}; an omitted", countFact(board.SpendLimitMaxCredits)},
 		{"docs/PROTOCOL.md", "may carry `reward`: whole credits from 1 to {N}, on your own", countFact(board.WorkRewardMax)},
+		{"docs/TOOLS_WORK.md", "a list row carries up to {N} of the request", sizeFactExact(board.WorkRequestExcerptMax)},
+		{"docs/TOOLS_WORK.md", "the work detail carries up to {N} in `request.text`", sizeFactExact(board.WorkRequestTextMax)},
 		{"docs/PROTOCOL.md", "At most {N} rewards are held per requester", countFact(board.WorkRewardsHeldMax)},
 		{"docs/PROTOCOL.md", "`reviewer_fee`, whole credits from 1 to {N}, is held", countFact(board.WorkRewardMax)},
 		{"docs/PROTOCOL.md", "counts once toward the {N} rewards held per requester", countFact(board.WorkRewardsHeldMax)},

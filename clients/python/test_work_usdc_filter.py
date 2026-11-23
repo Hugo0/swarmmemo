@@ -5,6 +5,7 @@ import copy
 import io
 import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import swarmmemo as memo
@@ -23,30 +24,24 @@ def run_cli(argv, response):
 
 class WorkUSDCFilterTests(unittest.TestCase):
     def test_cli_keeps_usdc_and_standing_tiers_and_sends_no_new_field(self):
-        response = page([
-            {"id": "credit-paid", "reward": {"amount": 100, "state": "paid"}},
-            {"id": "cash-promised", "reward_usdc": {"amount": "0.02", "state": "promised"}},
-            {"id": "conditional", "standing": {"tiers": [{"name": "a", "credits": 20}, {"name": "b", "credits": 60, "usdc": "0.05"}]}},
-            {"id": "cash-void", "reward_usdc": {"amount": "0.05", "state": "void"}},
-        ], has_more=True, since="unchanged-cursor", usdc_next=[{"id": "later"}])
+        fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))
+        response = cases["filterPage"]
         before = copy.deepcopy(response)
         code, command, got = run_cli(["--anonymous", "work", "list", "--kind", "rewarded", "--usdc-only"], response)
         self.assertEqual(code, 0)
-        self.assertEqual([w["id"] for w in got["data"]["works"]], ["cash-promised", "conditional"])
-        self.assertEqual(got["data"]["since"], "unchanged-cursor")
-        self.assertTrue(got["data"]["has_more"])
-        self.assertEqual(got["data"]["usdc_next"], [{"id": "later"}])
+        self.assertEqual([w["id"] for w in got["data"]["works"]], cases["filterKeptIds"])
+        self.assertEqual(got["next_cursor"], response["next_cursor"])
+        self.assertEqual({k: v for k, v in got["data"].items() if k != "works"},
+                         {k: v for k, v in response["data"].items() if k != "works"})
         self.assertEqual(got["data"]["works"][0]["reward_usdc"]["state"], "promised")
         # The filter is local: the board gets the same works.list as without the flag.
         self.assertEqual(command.call_args.args, ("works.list",))
         self.assertEqual(command.call_args.kwargs, {"kind": "rewarded"})
         self.assertEqual(response, before)
 
-    def test_empty_filtered_page_keeps_cursor_and_rejects_zero_or_invalid_amounts(self):
-        amounts = ["0", "0.000000", "NaN", "-1", "1e3", "0.0000001", " 1", True, 1, None]
-        response = page([{"reward_usdc": {"amount": v}} for v in amounts]
-                        + [{"standing": {"tiers": [{"usdc": "0.00"}, {"usdc": 5}]}}, {"standing": "x"}, "not-a-row"],
-                        cursor="next-page", has_more=True)
+    def test_empty_filtered_page_keeps_data_cursor(self):
+        response = page([{"reward": {"amount": 5}}], cursor="next-page", has_more=True)
         got = memo.filter_usdc_work_page(response)
         self.assertEqual(got["data"]["works"], [])
         self.assertEqual(got["data"]["cursor"], "next-page")

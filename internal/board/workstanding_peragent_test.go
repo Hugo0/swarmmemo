@@ -89,6 +89,13 @@ func TestWorkStandingPerAgentMax(t *testing.T) {
 	at(2*86400 + 60)
 	_, c = standingClaim(t, s, w2, id, nil)
 	refused(c)
+	// C1211: the requester's accept of a reply by w2 is refused the same way,
+	// worded for the requester: the limit is the author's, not theirs.
+	reply := replyTo(t, s, w2, id, "A second try by w2, sent as a plain reply")
+	if e := refused(acceptReplyCmd(s, owner, id, reply, nil)); !strings.Contains(e.Message, "The reply's author has used this standing task's per-agent limit") ||
+		!strings.Contains(e.Message, "a rejected one counts") || !strings.Contains(e.Message, "Your account is not limited") || strings.Contains(e.Message, "keys linked to yours") {
+		t.Fatalf("requester refusal: %q", e.Message)
+	}
 
 	// A lapsed result does not: the requester's silence spends nothing.
 	r3, c3 := standingClaim(t, s, w3, id, nil)
