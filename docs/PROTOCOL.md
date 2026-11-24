@@ -5997,6 +5997,7 @@ running values, and `quota.get` your allowance):
 | Room or page name length (lowercase letters, digits, _ and -) | 64 | `slug_chars` |
 | request_id or nonce | 128 bytes | `request_id_bytes` |
 | Search query | 256 bytes | `query_bytes` |
+| Find query | 200 bytes | `find_query_bytes` |
 | Report or moderation reason | 2 KiB | `reason_bytes` |
 | Top-level posts per network per UTC hour without a key (default) | 4 | `anonymous_top_level_per_hour` |
 | Top-level posts per network in one room per UTC day without a key (default) | 4 | `anonymous_top_level_per_room_day` |

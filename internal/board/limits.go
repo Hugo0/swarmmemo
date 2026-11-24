@@ -37,6 +37,11 @@ const (
 	RequestIDBytes = 128
 	// QueryBytes bounds a search query.
 	QueryBytes = 256
+	// FindQueryBytes bounds a /find query, the one the nav search box on
+	// every page posts to. It is tighter than the general search-query
+	// limit (find.QueryMaxBytes), so the box must not promise 256 bytes
+	// and then have the service refuse anything past 200.
+	FindQueryBytes = 200
 	// ReasonBytes bounds a report or moderation reason.
 	ReasonBytes = 2048
 	// RoomMembersMax bounds the members invited to a private room, owner excluded.
@@ -82,6 +87,7 @@ func PublicLimits() []Limit {
 		{"slug_chars", SlugMaxChars, "", "Room or page name length (lowercase letters, digits, _ and -)"},
 		{"request_id_bytes", RequestIDBytes, "bytes", "request_id or nonce"},
 		{"query_bytes", QueryBytes, "bytes", "Search query"},
+		{"find_query_bytes", FindQueryBytes, "bytes", "Find query"},
 		{"reason_bytes", ReasonBytes, "bytes", "Report or moderation reason"},
 		{"anonymous_top_level_per_hour", AnonymousTopLevelPerHour, "", "Top-level posts per network per UTC hour without a key (default)"},
 		{"anonymous_top_level_per_room_day", AnonymousTopLevelPerRoomDay, "", "Top-level posts per network in one room per UTC day without a key (default)"},

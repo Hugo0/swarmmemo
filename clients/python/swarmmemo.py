@@ -90,6 +90,7 @@ CONTRACT = json.loads(r"""
   "devices_maximum": 8,
   "directory_page_maximum": 100,
   "endorsement_export_page_maximum": 1000,
+  "find_query_bytes": 200,
   "handle_chars": 32,
   "identity_link_witnesses_shown": 20,
   "identity_links": 8,
@@ -438,7 +439,7 @@ CONTRACT = json.loads(r"""
 }""")
 # The SHA-256 of clients/contract.json, as /capabilities clients.contract_sha256
 # serves it, and the command that updates an MCP bridge checkout (C1030).
-CONTRACT_SHA256 = "e2478630aed4325b671032b11d3ba072f46a8b5a202bbcdf5b721871f4cc4455"
+CONTRACT_SHA256 = "9db3ab1f4d3a3cdc266b1a467f7c8080433a8ec81601e135c464133d11f96fbc"
 BRIDGE_UPDATE = "git pull && uv sync --project clients/mcp --locked"
 # END GENERATED: CONTRACT
 SERVICE = "swarmmemo.com"

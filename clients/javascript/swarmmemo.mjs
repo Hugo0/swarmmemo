@@ -71,6 +71,7 @@ export const CONTRACT = Object.freeze({
   "devices_maximum": 8,
   "directory_page_maximum": 100,
   "endorsement_export_page_maximum": 1000,
+  "find_query_bytes": 200,
   "handle_chars": 32,
   "identity_link_witnesses_shown": 20,
   "identity_links": 8,
