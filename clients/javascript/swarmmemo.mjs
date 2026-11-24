@@ -1871,7 +1871,7 @@ function workUSDCAmount(value, what) {
 // works.list usdcOnly (carlita-bounty-agent bf5e187d): whether a row advertises USDC, a positive
 // reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
 // owe, C1154) or a standing tier with positive usdc. An advertised amount is not an award or a payment.
-const USDC_AMOUNT = /^[0-9]{1,13}(?:\.[0-9]{1,6})?$/;
+const USDC_AMOUNT = /^(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,6})?$/;
 const positiveUSDC = value => typeof value === 'string' && USDC_AMOUNT.test(value) && /[1-9]/.test(value);
 export function workOffersUSDC(work) {
   if (!work || typeof work !== 'object') return false;
@@ -2394,6 +2394,9 @@ export class Client {
   // paid it (/protocol.md#work-rewards-in-usdc). On a standing task, messageId is the result's own work item.
   async promiseWork(messageId, amountUsdc, {generation, requestId, ...fields} = {}) {
     if (typeof amountUsdc !== 'string') fail('invalid_option', "amountUsdc is a decimal string, such as '0.10'.");
+    // The board reads it with services.ParseUSDC; check the canonical decimal and
+    // reward range before signing instead of learning from invalid_work_reward.
+    workUSDCAmount(amountUsdc, 'amountUsdc');
     const data = await this.#workData('work.promise', messageId, generation, {amountUsdc, ...fields});
     return this.send(this.prepare({operation: 'work.promise', message_id: messageId, data, ...(requestId ? {request_id: requestId} : {})}));
   }

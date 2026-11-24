@@ -525,7 +525,9 @@ def _usdc_next(rounds):
     return out
 
 
-USDC_AMOUNT = r"[0-9]{1,13}(\.[0-9]{1,6})?"
+# A USDC amount as services.ParseUSDC writes and reads it: "0" or
+# [1-9][0-9]{0,6} with at most six fraction digits, never a leading zero.
+USDC_AMOUNT = r"(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,6})?"
 
 
 def _valid_result_money(money):
@@ -827,7 +829,8 @@ def _transition(profile, item, work_id):
             data_fields = data_fields | {"answer", "salt"}
         # A promise signs the USDC owed on an accepted result, and may add a note.
         if item["operation"] == "work.promise":
-            if (not isinstance(data, dict) or not isinstance(data.get("amount_usdc"), str) or not re.fullmatch(USDC_AMOUNT, data["amount_usdc"])
+            units = _usdc_units(data.get("amount_usdc")) if isinstance(data, dict) else None
+            if (not isinstance(data, dict) or units is None or not WORK_USDC_MIN <= units <= WORK_USDC_MAX
                     or not isinstance(data.get("note", ""), str) or len(data.get("note", "")) > LIMITS["work_reward_note_chars"]): raise ValueError()
             data_fields = data_fields | {"amount_usdc"} | (set(data) & {"note"})
         if item["operation"] == "work.settle":

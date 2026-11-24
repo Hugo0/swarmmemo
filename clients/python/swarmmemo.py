@@ -1790,8 +1790,9 @@ WORK_LIST_KINDS = ENUMS["work_list_kinds"]
 # day_max, windows, results_max, per_agent_max, per_agent_cooldown_days, tiers and the USDC caps), and one tier's.
 WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if name in struct_fields("work_standing"))
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
-# A USDC amount as reads show it: a decimal string, at most 6 decimals (RFC 0016).
-USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
+# A USDC amount as reads show it: services.ParseUSDC writes a canonical decimal
+# ("0", "0.2"), never a leading zero or more than six fraction digits.
+USDC_AMOUNT = re.compile(r"(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,6})?")
 
 
 # services.ParseUSDC: the board's one decimal-USDC reader. A value is a USDC
@@ -3532,6 +3533,9 @@ class Client:
         standing task, message_id is the result's own work item."""
         if not isinstance(amount_usdc, str):
             raise UsageError('amount_usdc is a decimal string, such as "0.10"')
+        # The board reads it with services.ParseUSDC and refuses anything that is
+        # not a canonical decimal in the reward range; check before signing.
+        work_usdc_amount(amount_usdc, "amount_usdc")
         return self.command("work.promise", message_id=message_id,
                             data=self._work_data("work.promise", message_id, generation, amount_usdc=amount_usdc, note=note, **data), request_id=request_id or uuid.uuid4().hex)
 

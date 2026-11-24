@@ -618,6 +618,14 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.settle', message_id: id, request_id: 't-1', data: `{"schema":1,"generation":"${generation}","tx_hash":"${paidTx}"}`}]);
   verifySigned(requests[0].body); requests.length = 0;
   await assert.rejects(signed.settleWork(id, '0xABC', {generation}), /txHash/);
+  // work.promise signs the USDC owed only when it is the board's canonical
+  // decimal in the reward range; "01.0" and "0.1234567" must fail locally.
+  for (const usdc of ['01.0', '0.1234567', 'abc', '', ' 0.20', '0.001', '1000.01'])
+    await assert.rejects(signed.promiseWork(id, usdc, {generation}), /amountUsdc/, JSON.stringify(usdc));
+  await signed.promiseWork(id, '0.20', {generation, requestId: 'p-1'});
+  assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.promise', message_id: id, request_id: 'p-1',
+    data: `{"schema":1,"generation":"${generation}","amount_usdc":"0.20"}`}]);
+  verifySigned(requests[0].body); requests.length = 0;
   // Left out, the generation is read once with work.get, then signed into the transition.
   await signed.acceptWork(id, 3, {requestId: 'a-2'});
   assert.deepEqual(requests.map(r => r.body.operation), ['work.get', 'work.accept']);
@@ -1140,6 +1148,10 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
   assert.equal(workOffersUSDC('x'), false);
+  // The advertised amount is the board's decimal, not any numeric-looking string.
+  assert.equal(workOffersUSDC({reward_usdc: {state: 'promised', amount: '01.0'}}), false);
+  assert.equal(workOffersUSDC({standing: {tiers: [{usdc: '01.0'}]}}), false);
+  assert.equal(workOffersUSDC({reward_usdc: {state: 'promised', amount: '0.20'}}), true);
 });
 
 test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai 8b49d2b7)', async t => {
