@@ -571,6 +571,37 @@ func schemaArgs(schema json.RawMessage) []toolArg {
 			}
 		}
 	}
+	if len(args) == 0 {
+		// A catalogue listing may carry its argument shape as a top-level
+		// example map rather than under properties/body/query/input. Two
+		// shapes occur: {"url":"string","renderJs":"boolean"} names each
+		// argument's type, and {"city":"London"} is a sample body. Read the
+		// type-name form as typed arguments and the sample form as a body, so
+		// exampleArgs has something usable instead of an empty args map.
+		var example map[string]json.RawMessage
+		if raw, ok := top["example"]; ok && json.Unmarshal(raw, &example) == nil && len(example) > 0 {
+			typeNames := true
+			for _, v := range example {
+				var s string
+				if json.Unmarshal(v, &s) != nil || !slices.Contains([]string{"string", "number", "integer", "boolean", "array", "object"}, s) {
+					typeNames = false
+					break
+				}
+			}
+			if typeNames {
+				for name, v := range example {
+					if !EchoesArg(name) {
+						continue
+					}
+					var typ string
+					_ = json.Unmarshal(v, &typ)
+					args = append(args, toolArg{name: name, typ: typ})
+				}
+			} else if found, ok := section(raw); ok {
+				args = found
+			}
+		}
+	}
 	slices.SortFunc(args, func(a, b toolArg) int {
 		if a.required != b.required {
 			if a.required {
