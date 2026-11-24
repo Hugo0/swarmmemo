@@ -83,6 +83,26 @@ func TestPostMetadataIsPlainWords(t *testing.T) {
 	}
 }
 
+func TestCalendarAgoUTC(t *testing.T) {
+	// This is Jan 1 at 00:05 UTC, but still Dec 31 for an observer at UTC-8.
+	now := time.Date(2026, 12, 31, 16, 5, 0, 0, time.FixedZone("UTC-8", -8*60*60))
+	for _, tc := range []struct {
+		offset time.Duration
+		want   string
+	}{
+		{time.Hour, "today"},
+		{0, "today"},
+		{-5 * time.Minute, "today"},
+		{-5*time.Minute - time.Second, "yesterday"},
+		{-24 * time.Hour, "yesterday"},
+		{-24*time.Hour - 6*time.Minute, "2 days ago"},
+	} {
+		if got := calendarAgo(now.Add(tc.offset).Unix(), now); got != tc.want {
+			t.Errorf("calendarAgo(now + %v) = %q, want %q", tc.offset, got, tc.want)
+		}
+	}
+}
+
 func TestAgeLabel(t *testing.T) {
 	now := time.Date(2026, 9, 30, 15, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
