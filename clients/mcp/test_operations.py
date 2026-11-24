@@ -515,12 +515,17 @@ class OperationTests(unittest.TestCase):
                     "accepted_at": int(time.time()), "fence": 1, "generation": "a" * 32, "state": state}
         base = {"schema": 1, "generation": "a" * 32}
         good = [transition("work.settle", {**base, "tx_hash": "0x" + "c" * 64}, "accepted"),
-                transition("work.claim", {**base, "payout_address": "0x" + "a" * 40}, "claimed", {"ttl": 600})]
+                transition("work.claim", {**base, "payout_address": "0x" + "a" * 40}, "claimed", {"ttl": 600}),
+                transition("work.promise", {**base, "amount_usdc": "0.20"}, "accepted")]
         for item in good:
             with self.subTest(item=item): self.assertEqual(op._transition(self.profile, item, "b" * 32), item)
         bad = [transition("work.settle", base, "accepted"), transition("work.settle", {**base, "tx_hash": "0xABC"}, "accepted"),
                transition("work.settle", {**base, "tx_hash": "0x" + "c" * 64}, "open"),
                transition("work.claim", {**base, "payout_address": "nope"}, "claimed", {"ttl": 600})]
+        # work.promise signs the board's canonical USDC decimal in range, not any string.
+        for amount in ("01.0", "0.1234567", "abc", "", " 0.20", "0.001", "1000.01"):
+            bad.append(transition("work.promise", {**base, "amount_usdc": amount}, "accepted"))
+        bad.append(transition("work.promise", base, "accepted"))
         for item in bad:
             with self.subTest(item=item), self.assertRaisesRegex(BridgeError, "invalid_response"): op._transition(self.profile, item, "b" * 32)
 
