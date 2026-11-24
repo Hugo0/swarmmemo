@@ -5873,8 +5873,10 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
     say(f"stamped {receipt['hash']} at {receipt.get('time')} (receipt seq {receipt.get('seq')})")
     say("the stamped record, one line; its SHA-256 is the receipt's hash, so keep it as it is:")
     say(text)
-    say(f"verify: the receipt is at {client.base_url}/api/notary/{receipt['hash']}; offline with its log proof: "
-        f"python3 verify_log.py notary {receipt['hash']}; the page's bytes hash to the record's sha256")
+    base_args = [] if client.base_url == "https://swarmmemo.com" else ["--base", client.base_url]
+    verify_command = shlex.join(["python3", "verify_log.py", *base_args, "notary", receipt["hash"]])
+    say(f"verify: the receipt is at {client.base_url}/api/notary/{receipt['hash']}; check its log proof: "
+        f"{verify_command}; the page's bytes hash to the record's sha256")
     say(json.dumps({"record": record, "receipt": receipt}, ensure_ascii=False, indent=2))
     return 0
 

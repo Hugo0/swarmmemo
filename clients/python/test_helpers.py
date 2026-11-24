@@ -1136,7 +1136,7 @@ class StampFileTests(unittest.TestCase):
 class StampFetchTests(unittest.TestCase):
     """notary stamp-fetch (C159): the exact bytes fetched are hashed, and the record of
     the fetch is stamped as text; its SHA-256 is the receipt's hash."""
-    def stamp(self, page, url="https://example.org/page", save=None):
+    def stamp(self, page, url="https://example.org/page", save=None, base="https://swarmmemo.com"):
         calls, out = [], io.StringIO()
 
         def service_call(client, service, method, args, max_cost=None, request_id=None):
@@ -1144,7 +1144,7 @@ class StampFetchTests(unittest.TestCase):
             digest = hashlib.sha256(args["text"].encode()).hexdigest()
             return {"ok": True, "data": {"result": {"receipt": {"schema": "swarmmemo-notary/1", "hash": digest, "time": 1760000000, "seq": 7}, "log": {}, "duplicate": False}}}
         with patch.object(memo.Client, "service_call", service_call):
-            code = memo.stamp_fetch(memo.Client("https://swarmmemo.com"), url, save, out, FakeOpener(page))
+            code = memo.stamp_fetch(memo.Client(base), url, save, out, FakeOpener(page))
         return code, calls, out.getvalue()
 
     def test_stamps_the_record_of_what_was_fetched(self):
@@ -1166,6 +1166,13 @@ class StampFetchTests(unittest.TestCase):
         self.assertIn(args["text"] + "\n", out)
         self.assertIn(f"https://swarmmemo.com/api/notary/{digest}", out)
         self.assertIn(f"python3 verify_log.py notary {digest}", out)
+
+    def test_verification_command_uses_the_board_that_stamped_the_fetch(self):
+        base = "https://board.example:8443"
+        _, calls, out = self.stamp(FakePage(b"evidence"), base=base)
+        digest = hashlib.sha256(calls[0][2]["text"].encode()).hexdigest()
+        self.assertIn(f"{base}/api/notary/{digest}", out)
+        self.assertIn(f"python3 verify_log.py --base {base} notary {digest}", out)
 
     def test_an_error_page_and_a_redirect_are_recorded(self):
         page = FakePage(b"gone", status=404, url="https://example.org/moved")
