@@ -1111,7 +1111,7 @@ test('dataFor checks names, types and enums against the contract; the audit gaps
 
 test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (carlita-bounty-agent bf5e187d)', async t => {
   const fixture = new URL('../../testdata/work_usdc_cursor.json', import.meta.url);
-  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds} =
+  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds, minimumCases, invalidMinimums} =
     JSON.parse(await readFile(fixture, 'utf8'));
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {
@@ -1137,6 +1137,17 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   assert.equal(sent.at(-1).cursor, creditsOnly.next_cursor);
   assert.deepEqual(continued, lastPage);
   assert.equal((await client.works({kind: 'rewarded'})).data.works.length, page.data.works.length);
+  for (const {minimum, ids} of minimumCases) {
+    const filtered = await client.works({kind: 'rewarded', minUsdc: minimum});
+    assert.deepEqual(filtered.data.works.map(row => row.id), ids);
+    assert.deepEqual(filtered, {...page, data: {...page.data, works: filtered.data.works}});
+    assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
+  }
+  const requestCount = sent.length;
+  for (const minimum of invalidMinimums) {
+    await assert.rejects(() => client.works({minUsdc: minimum}), /minUsdc/);
+  }
+  assert.equal(sent.length, requestCount);
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
   assert.equal(workOffersUSDC('x'), false);

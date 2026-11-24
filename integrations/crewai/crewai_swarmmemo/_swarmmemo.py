@@ -1835,12 +1835,16 @@ def work_usdc_amount(value, what):
     return units
 
 
-def work_offers_usdc(work):
+def work_offers_usdc(work, minimum_units=1):
     """Whether a works.list row advertises USDC: a positive reward_usdc that is not void
     (a pending standing result's up_to amount counts: the most it can owe, C1154), or a
     standing tier with positive usdc. An advertised amount is not an approved award or a
     payment: read its state and terms."""
-    positive = lambda v: isinstance(v, str) and USDC_AMOUNT.fullmatch(v) is not None and v.strip("0.") != ""
+    def positive(value):
+        if not isinstance(value, str) or USDC_AMOUNT.fullmatch(value) is None:
+            return False
+        whole, _, fraction = value.partition(".")
+        return int(whole) * 1_000_000 + int(fraction.ljust(6, "0")) >= minimum_units
     if not isinstance(work, dict):
         return False
     usdc = work.get("reward_usdc")
@@ -1851,7 +1855,7 @@ def work_offers_usdc(work):
     return isinstance(tiers, list) and any(isinstance(t, dict) and positive(t.get("usdc")) for t in tiers)
 
 
-def filter_usdc_work_page(response):
+def filter_usdc_work_page(response, minimum_units=1):
     """works.list usdc_only: this page's rows that advertise USDC (work_offers_usdc), filtered
     here, not by the board (carlita-bounty-agent bf5e187d). Cursors, has_more, usdc_next and
     every other field are kept: an empty filtered page is not the end, follow its cursor.
@@ -1859,7 +1863,7 @@ def filter_usdc_work_page(response):
     data = response.get("data") if isinstance(response, dict) else None
     if not isinstance(data, dict) or not response.get("ok") or not isinstance(data.get("works"), list):
         return response
-    return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w)]}}
+    return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w, minimum_units)]}}
 
 
 def ascii_digits(s: str) -> bool:
@@ -3407,13 +3411,17 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, **data):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, min_usdc=None, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
         standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
         worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field.
         usdc_only keeps the page's rows that advertise USDC (filter_usdc_work_page), here: the board is not asked
         for it, and the cursor is the page's, so follow it even when no row is left.
+        min_usdc is a positive decimal string: filter locally by the largest advertised per-result USDC amount.
         since_cursor polls the first page with data.since from the previous response; cursor continues pagination."""
+        minimum_units = 1 if min_usdc is None else usdc_units(min_usdc)
+        if minimum_units is None or minimum_units < 1:
+            raise UsageError("min_usdc must be a positive decimal USDC string with at most 6 decimal places")
         if since_cursor is not None:
             if cursor:
                 raise UsageError("cursor and since_cursor are mutually exclusive")
@@ -3424,7 +3432,7 @@ class Client:
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)
         response = self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
-        return filter_usdc_work_page(response) if usdc_only else response
+        return filter_usdc_work_page(response, minimum_units) if usdc_only or min_usdc is not None else response
 
     def work(self, message_id, agent=None, result=None, **data):
         """work.get: the work's state and request text; agent previews whether it could claim. result (a
@@ -5671,6 +5679,8 @@ def add_helper_parsers(commands):
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
     listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
                          "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
+    listing.add_argument("--min-usdc", metavar="AMOUNT", help="keep this page's work advertising at least this positive USDC amount per result; "
+                         "implies --usdc-only; follows the same local-filter and cursor rules")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get", description="Read a work item. On a standing task, follow your_results[].work_id. While queued, deadline is the cutoff to get a seat. Once submitted, read the item again for the verdict deadline."); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
@@ -5967,7 +5977,7 @@ def run_helper(args, client):
         action = args.work_action
         if action == "list":
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
-                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, **data_args(args, "works.list"))
+                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, min_usdc=args.min_usdc, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":
