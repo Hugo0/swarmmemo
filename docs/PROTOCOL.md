@@ -2443,7 +2443,8 @@ as the command's `cursor`. Unchanged, the answer is `data.unchanged: true`, a fr
 `data.since`. The cursor is a keyed hash of the page: equal pages give equal cursors,
 and it holds no argument or row. `since` and `cursor` are never sent together
 (`400 invalid_request`). A since cursor from another server generation, or a damaged
-one of the wrong shape (not 16 base64url characters), is never an error: the answer is
+one of the wrong shape (not `since.` followed by the 32-character server
+generation, a dot, and 22 base64url characters), is never an error: the answer is
 the full first page with `data.since_reset: true`. A same-generation cursor of the right
 shape that is not the current page's cursor answers the full first page too, without
 `since_reset`. A
