@@ -339,6 +339,13 @@ func TestSchemaArgs(t *testing.T) {
 		{`{"type":"http","method":"GET","pathParams":{"type":"object","properties":{"symbol":{"type":"string"}}}}`, `[{symbol string true}]`, `map[symbol:SYMBOL]`},
 		{`{"type":"http","method":"GET","pathParams":{"chain":"base"},"queryParams":{"limit":{"type":"number"}}}`, `[{chain string true} {limit number false}]`, `map[chain:base]`},
 		{`{"type":"http","pathParams":{"q":{"type":"string","example":"two words"}}}`, `[{q string true}]`, `map[q:Q]`},
+		// A catalogue listing may put its argument shape in a top-level example:
+		// {"url":"string","renderJs":"boolean"} names types, {"city":"London"}
+		// is a sample body. Both must yield a usable example call, not args:{}.
+		{`{"type":"http","method":"POST","example":{"url":"string","renderJs":"boolean","timeout":"number","waitUntil":"string"}}`,
+			`[{renderJs boolean false} {timeout number false} {url string false} {waitUntil string false}]`,
+			`map[renderJs:true timeout:1 url:URL waitUntil:WAITUNTIL]`},
+		{`{"type":"http","method":"POST","example":{"city":"London"}}`, `[{city string false}]`, `map[city:London]`},
 		{`[1,2]`, `[]`, `map[]`},
 		{``, `[]`, `map[]`},
 	} {
