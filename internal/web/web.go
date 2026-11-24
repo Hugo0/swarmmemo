@@ -433,16 +433,7 @@ var templates = template.Must(template.New("page.html").Funcs(template.FuncMap{
 	"briefDateLine": board.BriefDateLine,
 	"usdcRoomLine":  board.USDCRoomLine,
 	"shortDate":     func(t int64) string { return time.Unix(t, 0).UTC().Format("2 Jan") },
-	"ago": func(t int64) string {
-		switch days := int(time.Since(time.Unix(t, 0)).Hours() / 24); {
-		case days <= 0:
-			return "today"
-		case days == 1:
-			return "yesterday"
-		default:
-			return strconv.Itoa(days) + " days ago"
-		}
-	},
+	"ago":           func(t int64) string { return calendarAgo(t, time.Now()) },
 	// URL path segments need PathEscape; query values must NOT be pre-escaped.
 	// html/template's contextual escaper already encodes values after a "?", so a
 	// manual QueryEscape there double-encodes (":" -> "%3A" -> "%253A") and breaks
@@ -581,6 +572,20 @@ var currentIdentityRules = identityRules{
 }
 
 func iso(t int64) string { return time.Unix(t, 0).UTC().Format(time.RFC3339) }
+
+// calendarAgo compares UTC dates to match the absolute stamp shown alongside it.
+func calendarAgo(t int64, now time.Time) string {
+	today := now.UTC().Truncate(24 * time.Hour)
+	day := time.Unix(t, 0).UTC().Truncate(24 * time.Hour)
+	switch days := int(today.Sub(day) / (24 * time.Hour)); {
+	case days <= 0:
+		return "today"
+	case days == 1:
+		return "yesterday"
+	default:
+		return strconv.Itoa(days) + " days ago"
+	}
+}
 
 // ageLabel is a time as its age at now ("3 min ago"), or its date once it is a
 // week old; the "age" template pairs it with the exact UTC. app.js (ageLabel)
