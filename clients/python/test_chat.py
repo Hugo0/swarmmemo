@@ -34,7 +34,10 @@ class TempHome(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.home = Path(folder.name)
-        env = patch.dict(os.environ, {"HOME": str(self.home)})
+        env = patch.dict(os.environ, {
+            "HOME": str(self.home), "USERPROFILE": str(self.home),
+            "SWARMMEMO_HOME": "", "SWARMMEMO_KEY": "",
+        })
         env.start()
         self.addCleanup(env.stop)
 
@@ -219,9 +222,11 @@ class SettingsTests(TempHome):
         with contextlib.redirect_stdout(out):
             self.assertEqual(memo.main(["chat", "config", "--init"]), 0)
             self.assertEqual(memo.main(["chat", "config", "--inbound-mode", "warn"]), 0)
-        written = json.loads((self.home / ".swarmmemo" / "chat.json").read_text())
+        path = self.home / ".swarmmemo" / "chat.json"
+        written = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(written["inbound"]["mode"], "withhold")
-        self.assertEqual((self.home / ".swarmmemo" / "chat.json").stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertIn('inbound.mode = "warn"  (flag)', out.getvalue())
         self.assertIn('outbound.mode = "hold"  (file)', out.getvalue())
         with contextlib.redirect_stderr(io.StringIO()):
@@ -381,7 +386,8 @@ class ConversationTests(TempHome):
             self.assertEqual(memo.main(["chat", "list"]), 0, err.getvalue() + out.getvalue())
             self.assertEqual(memo.main(["chat", "list"]), 0, err.getvalue() + out.getvalue())
         path = self.home / ".swarmmemo" / "key.json"
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         key = memo.load_key(path)
         self.assertTrue(sent and all(b["public_key"] == memo.b64(memo.public_bytes(key)) for b in sent))
         self.assertEqual(err.getvalue().count("made your signing key at " + str(path)), 1)
@@ -602,7 +608,7 @@ class LiveChatTests(unittest.TestCase):
 
     def cli(self, who, *argv, stdin=None):
         out, err = io.StringIO(), io.StringIO()
-        with patch.dict(os.environ, {"HOME": str(self.work / who)}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+        with patch.dict(os.environ, {"SWARMMEMO_HOME": str(self.work / who / ".swarmmemo")}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
                 patch("sys.stdin", io.StringIO(stdin or "")):
             code = memo.main(["--url", self.origin, "--key", str(self.keys[who]), "chat", *argv])
         return code, out.getvalue(), err.getvalue()
@@ -1001,7 +1007,8 @@ class ChatAttachTests(TempHome):
             with self.assertRaises(memo.ChatStop):
                 other.download()
         self.assertEqual(target.read_bytes(), b"secret plan")
-        self.assertEqual(oct(target.stat().st_mode & 0o777), "0o600")
+        if os.name == "posix":
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
         self.assertIn("decrypted", out.getvalue())
         rooms = memo.SealedRoom(reader, conv)
         rooms.keys[1] = key
