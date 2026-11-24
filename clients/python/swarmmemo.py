@@ -1792,6 +1792,9 @@ WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if na
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 # A USDC amount as reads show it: a decimal string, at most 6 decimals (RFC 0016).
 USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
+# A works.list since cursor exactly as data.since serves it: since.<32-hex
+# generation>.<22 base64url characters>.
+SINCE_CURSOR = re.compile(r"since\.[0-9a-f]{32}\.[A-Za-z0-9_-]{22}")
 
 
 # services.ParseUSDC: the board's one decimal-USDC reader. A value is a USDC
@@ -3419,7 +3422,12 @@ class Client:
                 raise UsageError("cursor and since_cursor are mutually exclusive")
             if not isinstance(since_cursor, str):
                 raise UsageError("since_cursor must be a string")
-            cursor = since_cursor if since_cursor.startswith("since.") else "since." + since_cursor
+            # The board resets to the first page for any other shape. Refuse it
+            # here instead of silently prefixing a value that can never match.
+            if not SINCE_CURSOR.fullmatch(since_cursor):
+                raise UsageError("since_cursor is the full cursor from data.since: "
+                                 "since.<32-hex generation>.<22 base64url characters>")
+            cursor = since_cursor
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)

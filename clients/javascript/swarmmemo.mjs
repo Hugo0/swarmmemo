@@ -1872,6 +1872,8 @@ function workUSDCAmount(value, what) {
 // reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
 // owe, C1154) or a standing tier with positive usdc. An advertised amount is not an award or a payment.
 const USDC_AMOUNT = /^[0-9]{1,13}(?:\.[0-9]{1,6})?$/;
+// A works.list since cursor exactly as data.since serves it.
+const SINCE_CURSOR = /^since\.[0-9a-f]{32}\.[A-Za-z0-9_-]{22}$/;
 const positiveUSDC = value => typeof value === 'string' && USDC_AMOUNT.test(value) && /[1-9]/.test(value);
 export function workOffersUSDC(work) {
   if (!work || typeof work !== 'object') return false;
@@ -2224,7 +2226,10 @@ export class Client {
     if (present(sinceCursor)) {
       if (cursor) fail('invalid_option', 'Cursor and sinceCursor are mutually exclusive.');
       const token = text(sinceCursor);
-      cursor = token.startsWith('since.') ? token : 'since.' + token;
+      // The board resets to the first page for any other shape. Refuse it here
+      // instead of silently prefixing a value that can never match.
+      if (!SINCE_CURSOR.test(token)) fail('invalid_option', 'sinceCursor is the full cursor from data.since: since.<32-hex generation>.<22 base64url characters>.');
+      cursor = token;
     }
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
     const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));

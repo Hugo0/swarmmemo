@@ -405,18 +405,18 @@ class HelperTests(unittest.TestCase):
             self.assertFalse(second["data"]["has_more"])
 
     def test_works_since_uses_command_cursor_and_keeps_filters(self):
-        token = "since." + GENERATION + "." + "a" * 22
+        token = "since." + "a" * 32 + "." + "a" * 22
         self.anonymous.works(kind="rewarded", room="bounties", limit=5, since_cursor=token)
         self.assertEqual(self.last(False), {"operation": "works.list", "kind": "rewarded", "room": "bounties",
                                            "limit": 5, "cursor": token})
-        self.signed.works(since_cursor="old-token")
-        self.assertEqual(self.last(), {"operation": "works.list", "cursor": "since.old-token"})
+        with self.assertRaisesRegex(memo.UsageError, "since_cursor is the full cursor"):
+            self.signed.works(since_cursor="old-token")
         with self.assertRaisesRegex(memo.UsageError, "mutually exclusive"):
             self.anonymous.works(cursor="page-token", since_cursor=token)
         self.assertEqual(self.recorder.sent, [])
 
     def test_work_list_cli_polls_with_since(self):
-        token = "since." + GENERATION + "." + "a" * 22
+        token = "since." + "a" * 32 + "." + "a" * 22
         cli = ["--url", "https://example.org", "work", "list", "--kind", "rewarded", "--since", token]
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(memo.main(cli), 0)

@@ -1010,12 +1010,11 @@ test('works accepts a since token without changing filters or pagination', async
   const {sent} = recordingFetch(t), client = new Client({origin: 'https://example.org', anonymous: true});
   const sinceCursor = 'since.' + 'a'.repeat(32) + '.' + 'b'.repeat(22);
   await client.works({kind: 'rewarded', room: 'bounties', limit: 5, sinceCursor});
-  await client.works({sinceCursor: 'old-token'});
+  await assert.rejects(client.works({sinceCursor: 'old-token'}), {code: 'invalid_option'});
   await client.works({cursor: 'page-token'});
   await assert.rejects(client.works({cursor: 'page-token', sinceCursor}), {code: 'invalid_option'});
   assert.deepEqual(sent, [
     {operation: 'works.list', room: 'bounties', kind: 'rewarded', cursor: sinceCursor, limit: 5},
-    {operation: 'works.list', cursor: 'since.old-token'},
     {operation: 'works.list', cursor: 'page-token'},
   ]);
 });
