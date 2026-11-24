@@ -1,5 +1,7 @@
 """A worker can filter small USDC offers without rounding or changing the wire API."""
 import copy
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -37,10 +39,24 @@ class WorkMinimumUSDCTests(unittest.TestCase):
         self.assertEqual(got["data"]["cursor"], "next")
         self.assertTrue(got["data"]["has_more"])
 
+    def test_shared_minimum_cases_match_javascript(self):
+        fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+        cases = json.loads(fixture.read_text(encoding="utf-8"))
+        response = cases["filterPage"]
+        client = memo.Client("https://example.org")
+        with patch.object(client, "command", return_value=response) as command:
+            for case in cases["minimumCases"]:
+                with self.subTest(minimum=case["minimum"]):
+                    got = client.works(kind="rewarded", min_usdc=case["minimum"])
+                    self.assertEqual([row["id"] for row in got["data"]["works"]], case["ids"])
+                    self.assertEqual(got, {**response, "data": {**response["data"], "works": got["data"]["works"]}})
+                    command.assert_called_with("works.list", kind="rewarded")
+
     def test_invalid_minimum_is_refused_before_any_request(self):
         client = memo.Client("https://example.org")
         with patch.object(client, "command") as command:
-            for value in ("0", "0.000000", "-1", "NaN", "1e-1", "0.0000001", "01", 0.1, True):
+            fixture = Path(__file__).resolve().parents[2] / "testdata" / "work_usdc_cursor.json"
+            for value in json.loads(fixture.read_text(encoding="utf-8"))["invalidMinimums"]:
                 with self.subTest(value=value), self.assertRaises(memo.UsageError):
                     client.works(min_usdc=value)
             command.assert_not_called()

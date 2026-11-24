@@ -1872,21 +1872,25 @@ function workUSDCAmount(value, what) {
 // reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
 // owe, C1154) or a standing tier with positive usdc. An advertised amount is not an award or a payment.
 const USDC_AMOUNT = /^[0-9]{1,13}(?:\.[0-9]{1,6})?$/;
-const positiveUSDC = value => typeof value === 'string' && USDC_AMOUNT.test(value) && /[1-9]/.test(value);
-export function workOffersUSDC(work) {
+function meetsUSDCMinimum(value, minimumUnits) {
+  if (typeof value !== 'string' || !USDC_AMOUNT.test(value)) return false;
+  const [whole, fraction = ''] = value.split('.');
+  return BigInt(whole + fraction.padEnd(6, '0')) >= minimumUnits;
+}
+export function workOffersUSDC(work, minimumUnits = 1n) {
   if (!work || typeof work !== 'object') return false;
   const usdc = work.reward_usdc;
-  if (usdc && typeof usdc === 'object' && usdc.state !== 'void' && positiveUSDC(usdc.amount)) return true;
+  if (usdc && typeof usdc === 'object' && usdc.state !== 'void' && meetsUSDCMinimum(usdc.amount, minimumUnits)) return true;
   const tiers = work.standing && typeof work.standing === 'object' ? work.standing.tiers : undefined;
-  return Array.isArray(tiers) && tiers.some(tier => tier && typeof tier === 'object' && positiveUSDC(tier.usdc));
+  return Array.isArray(tiers) && tiers.some(tier => tier && typeof tier === 'object' && meetsUSDCMinimum(tier.usdc, minimumUnits));
 }
 // The page's rows that advertise USDC, filtered here, not by the board: cursors, has_more,
 // usdc_next and every other field are kept (an empty page is not the end: follow its cursor),
 // an error or a page without works comes back as it is, and the response is not mutated.
-export function filterUSDCWorkPage(response) {
+export function filterUSDCWorkPage(response, minimumUnits = 1n) {
   const data = response && typeof response === 'object' ? response.data : undefined;
   if (!data || typeof data !== 'object' || !response.ok || !Array.isArray(data.works)) return response;
-  return {...response, data: {...data, works: data.works.filter(workOffersUSDC)}};
+  return {...response, data: {...data, works: data.works.filter(work => workOffersUSDC(work, minimumUnits))}};
 }
 // A sealed known answer's commit (work.create answerCommit, /protocol.md#work-known-answers): the
 // lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and answer
@@ -2220,7 +2224,11 @@ export class Client {
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
   // sinceCursor polls the first page with data.since from the previous response.
-  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, ...data} = {}) {
+  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, minUsdc, ...data} = {}) {
+    const minimumUnits = minUsdc == null ? 1 : usdcUnits(minUsdc);
+    if (minimumUnits === null || minimumUnits < 1) {
+      fail('invalid_option', 'minUsdc must be a positive decimal USDC string with at most 6 decimal places.');
+    }
     if (present(sinceCursor)) {
       if (cursor) fail('invalid_option', 'Cursor and sinceCursor are mutually exclusive.');
       const token = text(sinceCursor);
@@ -2228,7 +2236,7 @@ export class Client {
     }
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
     const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
-    return usdcOnly ? filterUSDCWorkPage(response) : response;
+    return usdcOnly || minUsdc != null ? filterUSDCWorkPage(response, BigInt(minimumUnits)) : response;
   }
   // result (a direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites.
   // On a standing result, read data.work.deadline with data.work.state: queued is the cutoff
