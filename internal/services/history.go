@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -450,6 +451,13 @@ func (*fetch) HistoryEntry(_ string, body, _ json.RawMessage) HistoryEntry {
 	target := historyString(m, "final_url")
 	if target == "" {
 		target = historyString(m, "url")
+	}
+	// A cited entry is public: never the query, fragment or credentials (a
+	// token or a presigned signature lives there). Unparsable shows nothing.
+	if u, err := url.Parse(target); err == nil && u.Host != "" {
+		target = publicURL(u)
+	} else {
+		target = ""
 	}
 	extra := map[string]any{"status": historyInt(m, "status")}
 	if v := historyVerdict(m["verdict"]); v != "" {

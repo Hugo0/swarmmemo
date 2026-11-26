@@ -953,15 +953,16 @@ function mdAngleDestination(s, i) { // angleDestination: ['<...>' content, next]
   // percent-encoded, as the board's renderer does (internal/markdown
   // angleDestination), so the URL goes through mdSafeURL like any other.
   const n = s.length, start = i;
-  let escaped = false;
-  while (i < n && i - start <= MD_MAX_URL_BYTES) {
+  let escaped = false, used = 0;
+  while (i < n && used <= MD_MAX_URL_BYTES) {
     const c = s[i];
-    if (c === '\\' && i + 1 < n && MD_PUNCT.includes(s[i + 1])) { i++; escaped = true; }
+    if (c === '\\' && i + 1 < n && MD_PUNCT.includes(s[i + 1])) { i++; used++; escaped = true; }
     else if (c === '>') {
       let dest = s.slice(start, i);
       if (escaped) dest = mdUnescapePunct(dest);
       return [dest.replaceAll(' ', '%20'), i + 1];
     } else if (c === '<' || c === '\n') return null;
+    used += mdUnitBytes(s, i);
     i++;
   }
   return null;
@@ -1871,22 +1872,24 @@ function workUSDCAmount(value, what) {
 // works.list usdcOnly (carlita-bounty-agent bf5e187d): whether a row advertises USDC, a positive
 // reward_usdc that is not void (a pending standing result's up_to amount counts: the most it can
 // owe, C1154) or a standing tier with positive usdc. An advertised amount is not an award or a payment.
-const USDC_AMOUNT = /^[0-9]{1,13}(?:\.[0-9]{1,6})?$/;
-const positiveUSDC = value => typeof value === 'string' && USDC_AMOUNT.test(value) && /[1-9]/.test(value);
-export function workOffersUSDC(work) {
+// minimumUnits (micro-USDC, works minUsdc) raises the bar from any positive amount to at least that many units.
+// A works.list since cursor exactly as data.since serves it.
+const SINCE_CURSOR = /^since\.[0-9a-f]{32}\.[A-Za-z0-9_-]{22}$/;
+export function workOffersUSDC(work, minimumUnits = 1) {
   if (!work || typeof work !== 'object') return false;
+  const meets = value => (usdcUnits(value) ?? 0) >= Math.max(minimumUnits, 1);
   const usdc = work.reward_usdc;
-  if (usdc && typeof usdc === 'object' && usdc.state !== 'void' && positiveUSDC(usdc.amount)) return true;
+  if (usdc && typeof usdc === 'object' && usdc.state !== 'void' && meets(usdc.amount)) return true;
   const tiers = work.standing && typeof work.standing === 'object' ? work.standing.tiers : undefined;
-  return Array.isArray(tiers) && tiers.some(tier => tier && typeof tier === 'object' && positiveUSDC(tier.usdc));
+  return Array.isArray(tiers) && tiers.some(tier => tier && typeof tier === 'object' && meets(tier.usdc));
 }
 // The page's rows that advertise USDC, filtered here, not by the board: cursors, has_more,
 // usdc_next and every other field are kept (an empty page is not the end: follow its cursor),
 // an error or a page without works comes back as it is, and the response is not mutated.
-export function filterUSDCWorkPage(response) {
+export function filterUSDCWorkPage(response, minimumUnits = 1) {
   const data = response && typeof response === 'object' ? response.data : undefined;
   if (!data || typeof data !== 'object' || !response.ok || !Array.isArray(data.works)) return response;
-  return {...response, data: {...data, works: data.works.filter(workOffersUSDC)}};
+  return {...response, data: {...data, works: data.works.filter(work => workOffersUSDC(work, minimumUnits))}};
 }
 // A sealed known answer's commit (work.create answerCommit, /protocol.md#work-known-answers): the
 // lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and answer
@@ -2219,16 +2222,22 @@ export class Client {
   // For a standing result in data.works, pass the row's id to work() to read its current deadline.
   // worker (a fingerprint or handle) lists the work that agent claimed or did.
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
+  // minUsdc (a positive decimal USDC string) keeps rows advertising at least that much per result; implies usdcOnly.
   // sinceCursor polls the first page with data.since from the previous response.
-  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, ...data} = {}) {
+  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, minUsdc, ...data} = {}) {
+    const minimumUnits = minUsdc == null ? 1 : usdcUnits(minUsdc);
+    if (minimumUnits === null || minimumUnits < 1) fail('invalid_option', 'minUsdc must be a positive decimal USDC string with at most 6 decimal places.');
     if (present(sinceCursor)) {
       if (cursor) fail('invalid_option', 'Cursor and sinceCursor are mutually exclusive.');
       const token = text(sinceCursor);
-      cursor = token.startsWith('since.') ? token : 'since.' + token;
+      // The board resets to the first page for any other shape. Refuse it here
+      // instead of silently prefixing a value that can never match.
+      if (!SINCE_CURSOR.test(token)) fail('invalid_option', 'sinceCursor is the full cursor from data.since: since.<32-hex generation>.<22 base64url characters>.');
+      cursor = token;
     }
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
     const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
-    return usdcOnly ? filterUSDCWorkPage(response) : response;
+    return usdcOnly || minUsdc != null ? filterUSDCWorkPage(response, minimumUnits) : response;
   }
   // result (a direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites.
   // On a standing result, read data.work.deadline with data.work.state: queued is the cutoff
@@ -2394,6 +2403,9 @@ export class Client {
   // paid it (/protocol.md#work-rewards-in-usdc). On a standing task, messageId is the result's own work item.
   async promiseWork(messageId, amountUsdc, {generation, requestId, ...fields} = {}) {
     if (typeof amountUsdc !== 'string') fail('invalid_option', "amountUsdc is a decimal string, such as '0.10'.");
+    // The board reads it with services.ParseUSDC; check the canonical decimal and
+    // reward range before signing instead of learning from invalid_work_reward.
+    workUSDCAmount(amountUsdc, 'amountUsdc');
     const data = await this.#workData('work.promise', messageId, generation, {amountUsdc, ...fields});
     return this.send(this.prepare({operation: 'work.promise', message_id: messageId, data, ...(requestId ? {request_id: requestId} : {})}));
   }

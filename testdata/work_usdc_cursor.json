@@ -60,5 +60,14 @@
       ]
     }
   },
-  "filterKeptIds": ["cash-promised", "conditional", "up-to", "smallest"]
+  "filterKeptIds": ["cash-promised", "conditional", "up-to", "smallest"],
+  "minimumCases": [
+    {"minimum": "0.000001", "ids": ["cash-promised", "conditional", "up-to", "smallest"]},
+    {"minimum": "0.02", "ids": ["cash-promised", "conditional", "up-to"]},
+    {"minimum": "0.05", "ids": ["conditional", "up-to"]},
+    {"minimum": "0.050001", "ids": ["up-to"]},
+    {"minimum": "0.40", "ids": ["up-to"]},
+    {"minimum": "0.400001", "ids": []}
+  ],
+  "invalidMinimums": ["0", "0.000000", "-1", "NaN", "1e-1", "0.0000001", "01.0", "01", "10000000", 0.1, true]
 }

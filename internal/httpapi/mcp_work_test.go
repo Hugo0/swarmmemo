@@ -357,7 +357,7 @@ func TestStandingOpenSeatsOneName(t *testing.T) {
 
 	// The compact row carries the seat summary under read_work's names,
 	// and not the removed alias.
-	full := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 10, Open: 3, Submitted: 4, Queued: 1, Owed: 1, Paid: 2, PerAgentDay: 1, PerAgentMax: 1, PerAgentCooldownDays: 7, Full: true, PerResult: 150, NextOpenAt: 1788652800, BlockedBy: board.StandingBlockedResultsMax, BlockedNote: "full: all 9 results taken"}, Results: 9, DayMax: 10,
+	full := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 10, Open: 3, Submitted: 4, Queued: 1, Owed: 1, Paid: 2, PerAgentDay: 1, PerAgentMax: 1, PerAgentCooldownDays: 7, Full: true, PerResult: 150, NextOpenAt: 1788652800, BlockedBy: board.StandingBlockedResultsMax, BlockedNote: "full: all 9 results taken"}, Results: 9, DayMax: 10, ResultsUntil: 1788393600,
 		Tiers: []board.WorkStandingTier{{Name: "brief", Credits: 150}, {Name: "notable", Credits: 300, USDC: "0.10"}}}
 	result := board.Result{Data: map[string]any{"works": []board.Work{{ID: strings.Repeat("a", 32), Standing: full}}, "has_more": false, "standing": full}}
 	if err := compactWorks(&result, "https://swarmmemo.com"); err != nil {
@@ -375,8 +375,10 @@ func TestStandingOpenSeatsOneName(t *testing.T) {
 	seats, _ := row[standing].(map[string]any)
 	keys := slices.Sorted(maps.Keys(seats))
 	tiers := tag(board.WorkStanding{}, "Tiers")
-	want := slices.Sorted(slices.Values(append(board.WorkStandingSeatNames(), tiers)))
-	if !slices.Equal(keys, want) || seats[open] != float64(3) || row["seats_open"] != nil {
+	until := tag(board.WorkStanding{}, "ResultsUntil")
+	want := slices.Sorted(slices.Values(append(board.WorkStandingSeatNames(), tiers, until)))
+	// results_until (C1239): an open task past it takes no result.
+	if !slices.Equal(keys, want) || seats[open] != float64(3) || seats[until] != float64(full.ResultsUntil) || row["seats_open"] != nil {
 		t.Fatalf("compact row %v, want standing keys %v", row, want)
 	}
 	// Its tiers are read_work's (C1150): a credit tier, and a USDC tier

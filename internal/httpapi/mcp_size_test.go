@@ -78,10 +78,12 @@ import (
 // GitHub PR #61 (2026-11-21): read_work says which deadline a result's
 // read shows (about 70 bytes): /mcp 139,982, assistant 104,672; both
 // budgets raised by 100.
+// C1239 (2026-11-24): find_work rows carry results_until (about 260 bytes):
+// /mcp 140,271, core 101,759, assistant 104,961; all three raised by 400.
 var mcpToolsListBudget = map[string]int{
-	"/mcp":               140_000,
-	mcpProfileCore:       101_500,
-	web.AssistantMCPPath: 104_700,
+	"/mcp":               140_400,
+	mcpProfileCore:       101_900,
+	web.AssistantMCPPath: 105_100,
 }
 
 // mcpOutputSchemaBudget is the most bytes one tool's output schema may be.

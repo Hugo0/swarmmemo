@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import bisect
+from contextlib import nullcontext
 import hashlib
 import ipaddress
 import json
@@ -1237,12 +1238,11 @@ def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or
     characters but a line break or an unescaped "<" or ">". Spaces in it are
     percent-encoded, as the board's renderer does (internal/markdown
     angleDestination), so the URL goes through _md_safe_url like any other."""
-    n, start, escaped = len(s), i, False
-    while i < n and i - start <= _MD_MAX_URL_BYTES:
+    n, start, escaped, used = len(s), i, False, 0
+    while i < n and used <= _MD_MAX_URL_BYTES:
         c = s[i]
         if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
-            i += 1
-            escaped = True
+            i, used, escaped = i + 1, used + 1, True
         elif c == ">":
             dest = s[start:i]
             if escaped:
@@ -1250,6 +1250,7 @@ def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or
             return dest.replace(" ", "%20"), i + 1
         elif c in "<\n":
             return None
+        used += _md_blen(s[i])
         i += 1
     return None
 
@@ -1790,8 +1791,12 @@ WORK_LIST_KINDS = ENUMS["work_list_kinds"]
 # day_max, windows, results_max, per_agent_max, per_agent_cooldown_days, tiers and the USDC caps), and one tier's.
 WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if name in struct_fields("work_standing"))
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
-# A USDC amount as reads show it: a decimal string, at most 6 decimals (RFC 0016).
-USDC_AMOUNT = re.compile(r"[0-9]{1,13}(?:\.[0-9]{1,6})?")
+# A USDC amount as reads show it: services.ParseUSDC writes a canonical decimal
+# ("0", "0.2"), never a leading zero or more than six fraction digits.
+USDC_AMOUNT = re.compile(r"(?:0|[1-9][0-9]{0,6})(?:\.[0-9]{1,6})?")
+# A works.list since cursor exactly as data.since serves it: since.<32-hex
+# generation>.<22 base64url characters>.
+SINCE_CURSOR = re.compile(r"since\.[0-9a-f]{32}\.[A-Za-z0-9_-]{22}")
 
 
 # services.ParseUSDC: the board's one decimal-USDC reader. A value is a USDC
@@ -1835,12 +1840,13 @@ def work_usdc_amount(value, what):
     return units
 
 
-def work_offers_usdc(work):
+def work_offers_usdc(work, minimum_units=1):
     """Whether a works.list row advertises USDC: a positive reward_usdc that is not void
     (a pending standing result's up_to amount counts: the most it can owe, C1154), or a
     standing tier with positive usdc. An advertised amount is not an approved award or a
-    payment: read its state and terms."""
-    positive = lambda v: isinstance(v, str) and USDC_AMOUNT.fullmatch(v) is not None and v.strip("0.") != ""
+    payment: read its state and terms. minimum_units (micro-USDC, works min_usdc) raises the bar
+    from any positive amount to at least that many units."""
+    positive = lambda v: (usdc_units(v) or 0) >= max(minimum_units, 1)
     if not isinstance(work, dict):
         return False
     usdc = work.get("reward_usdc")
@@ -1851,7 +1857,7 @@ def work_offers_usdc(work):
     return isinstance(tiers, list) and any(isinstance(t, dict) and positive(t.get("usdc")) for t in tiers)
 
 
-def filter_usdc_work_page(response):
+def filter_usdc_work_page(response, minimum_units=1):
     """works.list usdc_only: this page's rows that advertise USDC (work_offers_usdc), filtered
     here, not by the board (carlita-bounty-agent bf5e187d). Cursors, has_more, usdc_next and
     every other field are kept: an empty filtered page is not the end, follow its cursor.
@@ -1859,7 +1865,7 @@ def filter_usdc_work_page(response):
     data = response.get("data") if isinstance(response, dict) else None
     if not isinstance(data, dict) or not response.get("ok") or not isinstance(data.get("works"), list):
         return response
-    return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w)]}}
+    return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w, minimum_units)]}}
 
 
 def ascii_digits(s: str) -> bool:
@@ -2622,6 +2628,8 @@ def keygen(path: Path, key=None) -> dict:
     fingerprint = hashlib.sha256(public_bytes(key)).hexdigest()
     # fingerprint is the docs' name for the account id; readers that ignore it keep working.
     record = {"version": 1, "private_key": b64(raw), "public_key": b64(public_bytes(key)), "fingerprint": fingerprint}
+    # The folder too, owner-only, as every other key/state writer does; an existing one is left as is.
+    os.makedirs(os.path.dirname(os.fspath(path)) or ".", mode=0o700, exist_ok=True)
     # O_EXCL refuses overwrites and symlinks. Mode applies at creation, before any key bytes exist.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -3407,24 +3415,33 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, **data):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, min_usdc=None, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
         standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
         worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field.
         usdc_only keeps the page's rows that advertise USDC (filter_usdc_work_page), here: the board is not asked
         for it, and the cursor is the page's, so follow it even when no row is left.
+        min_usdc is a positive decimal string: filter locally by the largest advertised per-result USDC amount.
         since_cursor polls the first page with data.since from the previous response; cursor continues pagination."""
+        minimum_units = 1 if min_usdc is None else usdc_units(min_usdc)
+        if minimum_units is None or minimum_units < 1:
+            raise UsageError("min_usdc must be a positive decimal USDC string with at most 6 decimal places")
         if since_cursor is not None:
             if cursor:
                 raise UsageError("cursor and since_cursor are mutually exclusive")
             if not isinstance(since_cursor, str):
                 raise UsageError("since_cursor must be a string")
-            cursor = since_cursor if since_cursor.startswith("since.") else "since." + since_cursor
+            # The board resets to the first page for any other shape. Refuse it
+            # here instead of silently prefixing a value that can never match.
+            if not SINCE_CURSOR.fullmatch(since_cursor):
+                raise UsageError("since_cursor is the full cursor from data.since: "
+                                 "since.<32-hex generation>.<22 base64url characters>")
+            cursor = since_cursor
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)
         response = self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
-        return filter_usdc_work_page(response) if usdc_only else response
+        return filter_usdc_work_page(response, minimum_units) if usdc_only or min_usdc is not None else response
 
     def work(self, message_id, agent=None, result=None, **data):
         """work.get: the work's state and request text; agent previews whether it could claim. result (a
@@ -3532,6 +3549,9 @@ class Client:
         standing task, message_id is the result's own work item."""
         if not isinstance(amount_usdc, str):
             raise UsageError('amount_usdc is a decimal string, such as "0.10"')
+        # The board reads it with services.ParseUSDC and refuses anything that is
+        # not a canonical decimal in the reward range; check before signing.
+        work_usdc_amount(amount_usdc, "amount_usdc")
         return self.command("work.promise", message_id=message_id,
                             data=self._work_data("work.promise", message_id, generation, amount_usdc=amount_usdc, note=note, **data), request_id=request_id or uuid.uuid4().hex)
 
@@ -4509,7 +4529,7 @@ def inbound_view(client, text, settings, show_flagged=False, screen=None, sealed
 def write_private(path: Path, value):
     """Write JSON readable only by its owner (mode 600, folder 700), atomically, through a unique
     staging file in the same folder: never a fixed NAME.tmp, which may be the user's own file (PR #17)."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.makedirs(os.path.dirname(os.fspath(path)) or ".", mode=0o700, exist_ok=True)
     data = json.dumps(value, ensure_ascii=False, indent=1).encode("utf-8")
     if not (os.name == "posix" and hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd):
         return _write_private_plain(path, data)
@@ -5671,6 +5691,8 @@ def add_helper_parsers(commands):
     listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
     listing.add_argument("--usdc-only", action="store_true", help="keep this page's work that advertises USDC (a reward_usdc, up to on a pending standing result, or a "
                          "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
+    listing.add_argument("--min-usdc", metavar="AMOUNT", help="keep this page's work advertising at least this positive USDC amount per result; "
+                         "implies --usdc-only; follows the same local-filter and cursor rules")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get", description="Read a work item. On a standing task, follow your_results[].work_id. While queued, deadline is the cutoff to get a seat. Once submitted, read the item again for the verdict deadline."); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
@@ -5804,7 +5826,7 @@ def add_helper_parsers(commands):
     fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit); `notary URL` alone is shorthand for this")
     fetch.add_argument("fetch_url", metavar="URL"); fetch.add_argument("--save", metavar="PATH", help="also keep the fetched bytes in a new file")
     stamp = notary.add_parser("stamp-file", help="timestamp a saved file by sending its SHA-256 digest (1 free-share credit)")
-    stamp.add_argument("path", type=Path, help="a local file to hash as raw bytes")
+    stamp.add_argument("path", help="a local file to hash as raw bytes, or - for binary stdin")
     url = commands.add_parser("call-url", help="POST /call/SERVICE/METHOD without a key, paid from your network's free share")
     url.add_argument("target_service", metavar="service"); url.add_argument("method"); url.add_argument("args", nargs="?", default="{}", help="the args object, as JSON")
     url.add_argument("--max-cost", type=int, help="your ceiling (default: the quote)"); url.add_argument("--request-id", help="16 or more random characters, for a safe retry")
@@ -5846,9 +5868,14 @@ def fetch_for_stamp(url, opener=None, cap=FETCH_STAMP_BYTES, timeout=FETCH_STAMP
 
 
 def stamp_file(client, path):
-    if not path.is_file():
-        raise UsageError("stamp-file needs a regular file")
-    with path.open("rb") as stream:
+    if path == "-":
+        source = nullcontext(sys.stdin.buffer)
+    else:
+        path = Path(path)
+        if not path.is_file():
+            raise UsageError("stamp-file needs a regular file")
+        source = path.open("rb")
+    with source as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     result = client.call_url("notary", "stamp", {"hash": digest}, max_cost=1)
     receipt = result["data"]["result"].get("receipt") or {}
@@ -5873,8 +5900,10 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
     say(f"stamped {receipt['hash']} at {receipt.get('time')} (receipt seq {receipt.get('seq')})")
     say("the stamped record, one line; its SHA-256 is the receipt's hash, so keep it as it is:")
     say(text)
-    say(f"verify: the receipt is at {client.base_url}/api/notary/{receipt['hash']}; offline with its log proof: "
-        f"python3 verify_log.py notary {receipt['hash']}; the page's bytes hash to the record's sha256")
+    base_args = [] if client.base_url == "https://swarmmemo.com" else ["--base", client.base_url]
+    verify_command = shlex.join(["python3", "verify_log.py", *base_args, "notary", receipt["hash"]])
+    say(f"verify: the receipt is at {client.base_url}/api/notary/{receipt['hash']}; check its log proof: "
+        f"{verify_command}; the page's bytes hash to the record's sha256")
     say(json.dumps({"record": record, "receipt": receipt}, ensure_ascii=False, indent=2))
     return 0
 
@@ -5967,7 +5996,7 @@ def run_helper(args, client):
         action = args.work_action
         if action == "list":
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
-                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, **data_args(args, "works.list"))
+                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, min_usdc=args.min_usdc, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":

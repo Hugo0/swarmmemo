@@ -326,6 +326,35 @@ func parseWakeupRef(raw json.RawMessage) (wakeupRef, error) {
 	return a, nil
 }
 
+// wakeupByRef is the wake-up a cancel by key or id acts on: the active one
+// first, else the latest. The wakeups OAuth scope checks the same row
+// (WakeupCancelTarget), so a token's rule and the cancel never disagree.
+func wakeupByRef(ctx context.Context, q allowance.Querier, account string, ref wakeupRef) (wakeupView, error) {
+	where, arg := "key=?", ref.Key
+	if ref.ID != "" {
+		where, arg = "id=?", ref.ID
+	}
+	return scanWakeup(q.QueryRowContext(ctx, "SELECT "+wakeupColumns+" FROM wakeups WHERE account=? AND "+where+" ORDER BY state='active' DESC, created_at DESC, id DESC LIMIT 1", account, arg))
+}
+
+// WakeupCancelTarget reports what a cancel with these args would act on for
+// account: its kind as a read shows it (on), room and event. found is false
+// when the args are invalid or no wake-up matches.
+func WakeupCancelTarget(ctx context.Context, q allowance.Querier, account string, args json.RawMessage) (on, room, event string, found bool, err error) {
+	ref, err := parseWakeupRef(args)
+	if err != nil {
+		return "", "", "", false, nil
+	}
+	v, err := wakeupByRef(ctx, q, account, ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", false, nil
+	}
+	if err != nil {
+		return "", "", "", false, err
+	}
+	return v.On, v.Room, v.Event, true, nil
+}
+
 func (w *wakeup) Quote(c Call) (Quote, error) {
 	switch c.Method {
 	case "schedule":
@@ -483,11 +512,7 @@ func (w *wakeup) Run(ctx context.Context, tx *sql.Tx, c Call) (Result, error) {
 		}
 		// Cancel is idempotent: the active wake-up is cancelled; otherwise the
 		// latest one by that key or id is returned as it stands.
-		where, arg := "key=?", ref.Key
-		if ref.ID != "" {
-			where, arg = "id=?", ref.ID
-		}
-		v, err := scanWakeup(tx.QueryRowContext(ctx, "SELECT "+wakeupColumns+" FROM wakeups WHERE account=? AND "+where+" ORDER BY state='active' DESC, created_at DESC, id DESC LIMIT 1", account, arg))
+		v, err := wakeupByRef(ctx, tx, account, ref)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Result{}, refusal("wakeup_not_found")
 		}

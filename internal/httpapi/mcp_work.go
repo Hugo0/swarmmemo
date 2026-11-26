@@ -479,9 +479,12 @@ type compactWork struct {
 // one result may be paid (name, credits, usdc when it pays USDC), as
 // read_work's standing gives them, so a worker sees a USDC tier without a
 // second read (C1150). At most board.WorkStandingTiersMax tiers.
+// ResultsUntil is read_work's results_until, when results are due: a task
+// whose state is still open takes none after it (C1239).
 type compactWorkStanding struct {
 	board.WorkStandingSeats
-	Tiers []board.WorkStandingTier `json:"tiers,omitempty"`
+	Tiers        []board.WorkStandingTier `json:"tiers,omitempty"`
+	ResultsUntil int64                    `json:"results_until"`
 }
 
 // compactWorkUSDC is a row's reward_usdc; UpTo as read_work's (C1154).
@@ -515,7 +518,7 @@ func compactWorks(result *board.Result, origin string) error {
 	for _, w := range works {
 		row := compactWork{ID: w.ID, Title: w.Title, State: w.State, RewardNote: w.RewardNote, Eligibility: w.Eligibility, Eligible: w.Eligible, EligibleReason: w.EligibleReason, EligibilitySummary: w.EligibilitySummary, Deadline: w.Deadline, Claimable: w.Claimable, StandingID: w.StandingID, You: w.You, URL: origin + "/work/" + w.ID}
 		if w.Standing != nil {
-			row.Standing = &compactWorkStanding{WorkStandingSeats: w.Standing.WorkStandingSeats, Tiers: w.Standing.Tiers}
+			row.Standing = &compactWorkStanding{WorkStandingSeats: w.Standing.WorkStandingSeats, Tiers: w.Standing.Tiers, ResultsUntil: w.Standing.ResultsUntil}
 		}
 		if w.Reward != nil {
 			row.Reward = &compactWorkReward{Amount: w.Reward.Amount, Unit: w.Reward.Unit, UpTo: w.Reward.UpTo, State: w.Reward.State}

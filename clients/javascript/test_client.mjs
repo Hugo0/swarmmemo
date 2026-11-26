@@ -618,6 +618,14 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.settle', message_id: id, request_id: 't-1', data: `{"schema":1,"generation":"${generation}","tx_hash":"${paidTx}"}`}]);
   verifySigned(requests[0].body); requests.length = 0;
   await assert.rejects(signed.settleWork(id, '0xABC', {generation}), /txHash/);
+  // work.promise signs the USDC owed only when it is the board's canonical
+  // decimal in the reward range; "01.0" and "0.1234567" must fail locally.
+  for (const usdc of ['01.0', '0.1234567', 'abc', '', ' 0.20', '0.001', '1000.01'])
+    await assert.rejects(signed.promiseWork(id, usdc, {generation}), /amountUsdc/, JSON.stringify(usdc));
+  await signed.promiseWork(id, '0.20', {generation, requestId: 'p-1'});
+  assert.deepEqual(requests.map(r => shown(r.body)), [{operation: 'work.promise', message_id: id, request_id: 'p-1',
+    data: `{"schema":1,"generation":"${generation}","amount_usdc":"0.20"}`}]);
+  verifySigned(requests[0].body); requests.length = 0;
   // Left out, the generation is read once with work.get, then signed into the transition.
   await signed.acceptWork(id, 3, {requestId: 'a-2'});
   assert.deepEqual(requests.map(r => r.body.operation), ['work.get', 'work.accept']);
@@ -1010,12 +1018,11 @@ test('works accepts a since token without changing filters or pagination', async
   const {sent} = recordingFetch(t), client = new Client({origin: 'https://example.org', anonymous: true});
   const sinceCursor = 'since.' + 'a'.repeat(32) + '.' + 'b'.repeat(22);
   await client.works({kind: 'rewarded', room: 'bounties', limit: 5, sinceCursor});
-  await client.works({sinceCursor: 'old-token'});
+  await assert.rejects(client.works({sinceCursor: 'old-token'}), {code: 'invalid_option'});
   await client.works({cursor: 'page-token'});
   await assert.rejects(client.works({cursor: 'page-token', sinceCursor}), {code: 'invalid_option'});
   assert.deepEqual(sent, [
     {operation: 'works.list', room: 'bounties', kind: 'rewarded', cursor: sinceCursor, limit: 5},
-    {operation: 'works.list', cursor: 'since.old-token'},
     {operation: 'works.list', cursor: 'page-token'},
   ]);
 });
@@ -1111,7 +1118,7 @@ test('dataFor checks names, types and enums against the contract; the audit gaps
 
 test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (carlita-bounty-agent bf5e187d)', async t => {
   const fixture = new URL('../../testdata/work_usdc_cursor.json', import.meta.url);
-  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds} =
+  const {first: creditsOnly, second: lastPage, filterPage: page, filterKeptIds, minimumCases, invalidMinimums} =
     JSON.parse(await readFile(fixture, 'utf8'));
   const sent = [], original = globalThis.fetch;
   globalThis.fetch = async (url, {body} = {}) => {
@@ -1137,9 +1144,24 @@ test('works usdcOnly keeps USDC rows, tiers and up-to results, and the cursor (c
   assert.equal(sent.at(-1).cursor, creditsOnly.next_cursor);
   assert.deepEqual(continued, lastPage);
   assert.equal((await client.works({kind: 'rewarded'})).data.works.length, page.data.works.length);
+  for (const {minimum, ids} of minimumCases) {
+    const filtered = await client.works({kind: 'rewarded', minUsdc: minimum});
+    assert.deepEqual(filtered.data.works.map(row => row.id), ids);
+    assert.deepEqual(filtered, {...page, data: {...page.data, works: filtered.data.works}});
+    assert.deepEqual(Object.keys(sent.at(-1)).sort(), ['kind', 'operation']);
+  }
+  const requestCount = sent.length;
+  for (const minimum of invalidMinimums) {
+    await assert.rejects(() => client.works({minUsdc: minimum}), /minUsdc/);
+  }
+  assert.equal(sent.length, requestCount);
   const error = {ok: false, error: 'rate_limited'};
   assert.equal(filterUSDCWorkPage(error), error);
   assert.equal(workOffersUSDC('x'), false);
+  // The advertised amount is the board's decimal, not any numeric-looking string.
+  assert.equal(workOffersUSDC({reward_usdc: {state: 'promised', amount: '01.0'}}), false);
+  assert.equal(workOffersUSDC({standing: {tiers: [{usdc: '01.0'}]}}), false);
+  assert.equal(workOffersUSDC({reward_usdc: {state: 'promised', amount: '0.20'}}), true);
 });
 
 test('Markdown reviews and rated-accept notes sign format markdown (citepulse-ai 8b49d2b7)', async t => {

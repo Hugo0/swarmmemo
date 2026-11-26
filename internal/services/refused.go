@@ -80,6 +80,17 @@ func refusedEntry(out map[string]any, public string) {
 	}
 }
 
+// publicURL is a fetched URL as a record may show it: no port (80 or 443
+// only), no query string (it may carry tokens), no fragment, no credentials.
+// Refusals and history entries (a cited one is public) both use it.
+func publicURL(u *url.URL) string {
+	host := u.Hostname()
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: host, Path: u.Path, RawPath: u.RawPath}).String()
+}
+
 // fetchRefusal is the record of a fetch of u refused with code and the
 // refusal's details (robots_line, robots_status); nil for any refusal that is
 // not the site's own (an invalid URL, a private address, our own limits).
@@ -87,14 +98,7 @@ func fetchRefusal(u *url.URL, code string, details any) json.RawMessage {
 	if u == nil || !siteRefusalCode(code) {
 		return nil
 	}
-	host := u.Hostname()
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	// No port (80 or 443 only), no query string (it may carry tokens), no
-	// fragment, no credentials (fetch refuses them anyway).
-	where := &url.URL{Scheme: u.Scheme, Host: host, Path: u.Path, RawPath: u.RawPath}
-	target := where.String()
+	target := publicURL(u)
 	if len(target) > refusalTargetBytes {
 		target = target[:refusalTargetBytes] // percent-encoded: ASCII, cut anywhere
 	}

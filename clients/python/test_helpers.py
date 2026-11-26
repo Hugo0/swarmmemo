@@ -405,18 +405,18 @@ class HelperTests(unittest.TestCase):
             self.assertFalse(second["data"]["has_more"])
 
     def test_works_since_uses_command_cursor_and_keeps_filters(self):
-        token = "since." + GENERATION + "." + "a" * 22
+        token = "since." + "a" * 32 + "." + "a" * 22
         self.anonymous.works(kind="rewarded", room="bounties", limit=5, since_cursor=token)
         self.assertEqual(self.last(False), {"operation": "works.list", "kind": "rewarded", "room": "bounties",
                                            "limit": 5, "cursor": token})
-        self.signed.works(since_cursor="old-token")
-        self.assertEqual(self.last(), {"operation": "works.list", "cursor": "since.old-token"})
+        with self.assertRaisesRegex(memo.UsageError, "since_cursor is the full cursor"):
+            self.signed.works(since_cursor="old-token")
         with self.assertRaisesRegex(memo.UsageError, "mutually exclusive"):
             self.anonymous.works(cursor="page-token", since_cursor=token)
         self.assertEqual(self.recorder.sent, [])
 
     def test_work_list_cli_polls_with_since(self):
-        token = "since." + GENERATION + "." + "a" * 22
+        token = "since." + "a" * 32 + "." + "a" * 22
         cli = ["--url", "https://example.org", "work", "list", "--kind", "rewarded", "--since", token]
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(memo.main(cli), 0)
@@ -1111,6 +1111,27 @@ class FakeOpener:
 
 
 class StampFileTests(unittest.TestCase):
+    def test_dash_stamps_binary_stdin_and_keeps_it_open(self):
+        for body in (b"", b"\xff\x00raw\r\n\x1a\n" * 40000):
+            with self.subTest(size=len(body)):
+                digest = hashlib.sha256(body).hexdigest()
+                response = {"ok": True, "data": {"result": {"receipt": {"hash": digest}}}}
+                with io.TextIOWrapper(io.BufferedReader(io.BytesIO(body)), encoding="utf-8") as stdin:
+                    with patch.object(memo.sys, "stdin", stdin), patch.object(memo.Client, "call_url", return_value=response) as call:
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            self.assertEqual(memo.main(["notary", "stamp-file", "-"]), 0)
+                    self.assertFalse(stdin.closed)
+                call.assert_called_once_with("notary", "stamp", {"hash": digest}, max_cost=1)
+
+    def test_explicit_dash_filename_still_reads_the_file(self):
+        with tempfile.TemporaryDirectory() as folder, contextlib.chdir(folder):
+            Path("-").write_bytes(b"literal dash")
+            digest = hashlib.sha256(b"literal dash").hexdigest()
+            response = {"ok": True, "data": {"result": {"receipt": {"hash": digest}}}}
+            with patch.object(memo.Client, "call_url", return_value=response) as call, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(memo.main(["notary", "stamp-file", "./-"]), 0)
+            call.assert_called_once_with("notary", "stamp", {"hash": digest}, max_cost=1)
+
     def test_cli_sends_only_the_digest_and_returns_the_receipt(self):
         body = b"\xff\x00raw\r\nresponse\n"
         digest = hashlib.sha256(body).hexdigest()
@@ -1136,7 +1157,7 @@ class StampFileTests(unittest.TestCase):
 class StampFetchTests(unittest.TestCase):
     """notary stamp-fetch (C159): the exact bytes fetched are hashed, and the record of
     the fetch is stamped as text; its SHA-256 is the receipt's hash."""
-    def stamp(self, page, url="https://example.org/page", save=None):
+    def stamp(self, page, url="https://example.org/page", save=None, base="https://swarmmemo.com"):
         calls, out = [], io.StringIO()
 
         def service_call(client, service, method, args, max_cost=None, request_id=None):
@@ -1144,7 +1165,7 @@ class StampFetchTests(unittest.TestCase):
             digest = hashlib.sha256(args["text"].encode()).hexdigest()
             return {"ok": True, "data": {"result": {"receipt": {"schema": "swarmmemo-notary/1", "hash": digest, "time": 1760000000, "seq": 7}, "log": {}, "duplicate": False}}}
         with patch.object(memo.Client, "service_call", service_call):
-            code = memo.stamp_fetch(memo.Client("https://swarmmemo.com"), url, save, out, FakeOpener(page))
+            code = memo.stamp_fetch(memo.Client(base), url, save, out, FakeOpener(page))
         return code, calls, out.getvalue()
 
     def test_stamps_the_record_of_what_was_fetched(self):
@@ -1166,6 +1187,13 @@ class StampFetchTests(unittest.TestCase):
         self.assertIn(args["text"] + "\n", out)
         self.assertIn(f"https://swarmmemo.com/api/notary/{digest}", out)
         self.assertIn(f"python3 verify_log.py notary {digest}", out)
+
+    def test_verification_command_uses_the_board_that_stamped_the_fetch(self):
+        base = "https://board.example:8443"
+        _, calls, out = self.stamp(FakePage(b"evidence"), base=base)
+        digest = hashlib.sha256(calls[0][2]["text"].encode()).hexdigest()
+        self.assertIn(f"{base}/api/notary/{digest}", out)
+        self.assertIn(f"python3 verify_log.py --base {base} notary {digest}", out)
 
     def test_an_error_page_and_a_redirect_are_recorded(self):
         page = FakePage(b"gone", status=404, url="https://example.org/moved")

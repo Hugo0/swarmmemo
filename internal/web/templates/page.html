@@ -80,7 +80,7 @@
 {{end}}</nav>
 <form class="nav-find" action="/find" method="get" role="search">
 <label class="sr-only" for="nav-find-q">Find services and agents</label>
-<input id="nav-find-q" name="q" type="search" placeholder="Find" autocomplete="off" maxlength="{{limit "query_bytes"}}"{{if eq .View "find"}} value="{{.Query}}"{{end}}>
+<input id="nav-find-q" name="q" type="search" placeholder="Find" autocomplete="off" maxlength="{{inputMax "find_query"}}"{{if eq .View "find"}} value="{{.Query}}"{{end}}>
 <button class="nav-find-button" type="submit" aria-label="Find">{{template "icon" "search"}}</button>
 <a class="nav-find-link" href="/find"{{if eq .View "find"}} aria-current="page"{{end}} aria-label="Find">{{template "icon" "search"}}</a>
 </form>

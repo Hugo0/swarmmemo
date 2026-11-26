@@ -802,7 +802,7 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 		texts = append(texts, h.Description)
 	}
 	verdicts := x.verdictsFor(ctx, texts)
-	hosts := x.bundlerHosts(ctx, page.hits)
+	rows := x.bundlerSearchRows(ctx, page.hits)
 	via := x.catalogueMatches(ctx, page.hits)
 	ids := make([]string, len(page.hits))
 	for i, h := range page.hits {
@@ -815,29 +815,55 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 	hits, bought, later := []any{}, []any{}, []any{}
 	anyListed := false
 	for _, h := range page.hits {
-		q := f.cachedQuote(h, time.Now())
+		d, hasDescriptor, p, hasProbe := f.cachedTool(h.ID, time.Now())
+		q := hitQuote(h, d, hasDescriptor, p, hasProbe)
 		status := screenStatus(h.Description, verdicts)
 		desc := h.Description
 		if status == summaryWithheld {
 			desc = ""
 		}
-		host := hosts[h.ID]
+		row, hasRow := rows[h.ID]
+		bundlerVetted, category := h.Vetted, h.Category
+		host := ""
+		if hasRow {
+			bundlerVetted, host = row.vetted, row.host
+			if row.category != "" {
+				category = row.category
+			}
+		}
 		if u, err := url.Parse(h.URL); host == "" && err == nil {
 			host = strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 		}
+		if hasDescriptor {
+			if d.host != "" {
+				host = d.host
+			}
+			// The call checks both the recorded category and the live
+			// descriptor's. Prefer the live one unless the recorded one denies.
+			if d.category != "" && !neverVetted(category) && !f.denied(category, "") {
+				category = d.category
+			}
+		}
 		v, has := vets[h.ID]
-		byOperator := has && !neverVetted(h.Category) && v.holds(host, h.Method, q.price, q.priced)
-		vetted := h.Vetted || byOperator
+		byOperator := has && !neverVetted(category)
+		if byOperator && hasDescriptor {
+			byOperator = httpsURL(d.url) && v.holdsLive(d.host, d.method, q.price, q.priced)
+		} else if byOperator {
+			byOperator = v.holds(host, h.Method, q.price, q.priced)
+		}
+		vetted := bundlerVetted || byOperator
 		// The host the listing invokes when no descriptor recorded one: a
 		// denylisted host is refused here as the call refuses it (C1057).
-		why := f.whyNot(vetted, h.Category, host, q.price, q.priced)
-		if why == "" && h.Live != nil && !*h.Live {
+		why := f.whyNot(vetted, category, host, q.price, q.priced)
+		if why == "" && hasProbe && (!p.live || !p.payable) {
+			why = "tool_unavailable"
+		} else if why == "" && h.Live != nil && !*h.Live {
 			why = "tool_unavailable"
 		}
 		e := map[string]any{"id": bundlerToolID(h.ID), "title": h.Title, "description": desc, "description_truncated": h.Truncated, "summary_status": status,
-			"capabilities": h.Capabilities, "category": h.Category, "vetted": vetted, "max_cost": price.For(f.cfg.MaxCost)}
+			"capabilities": h.Capabilities, "category": category, "vetted": vetted, "max_cost": price.For(f.cfg.MaxCost)}
 		if byOperator {
-			e["vetted_by"], e["bundler_vetted"] = "operator", h.Vetted
+			e["vetted_by"], e["bundler_vetted"] = "operator", bundlerVetted
 		}
 		res := via[h.ID]
 		if res != nil {
@@ -859,7 +885,9 @@ func (x *x402) bundlerSearchRead(ctx context.Context, s bundlerSearch, price Pri
 			// The index lists another price than the live one: say so.
 			e["listed_price_usd"] = formatUnits(h.Price, 6)
 		}
-		if h.Live != nil {
+		if hasProbe {
+			e["live"], e["payable"] = p.live, p.payable
+		} else if h.Live != nil {
 			e["live"] = *h.Live
 		}
 		if h.Schema != nil {
@@ -1057,26 +1085,31 @@ func sameEndpoint(r *X402Resource, method, rawURL string, payTo []EVMAddress) bo
 	return len(payTo) == 0 || slices.Contains(payTo, r.PayTo)
 }
 
-// bundlerHosts are the hosts frames_tools knows for the hits (a call reads a
-// tool's descriptor and records its host).
-func (x *x402) bundlerHosts(ctx context.Context, hits []bundlerHit) map[string]string {
-	out := map[string]string{}
+// bundlerSearchRows are the current recorded facts for a search page's hits.
+// A cached search keeps its listing text, but vetting, category and host must
+// agree with the row a call reads. A newer search may have changed them.
+func (x *x402) bundlerSearchRows(ctx context.Context, hits []bundlerHit) map[string]bundlerTool {
+	out := map[string]bundlerTool{}
 	if len(hits) == 0 {
 		return out
+	}
+	type row struct {
+		id, category, host string
+		vetted             int
 	}
 	args := make([]any, len(hits))
 	for i, h := range hits {
 		args[i] = h.ID
 	}
-	rows, err := queryAll(ctx, x.db, func(r *sql.Rows) ([2]string, error) {
-		var v [2]string
-		return v, r.Scan(&v[0], &v[1])
-	}, "SELECT id,host FROM frames_tools WHERE host<>'' AND id IN (?"+strings.Repeat(",?", len(hits)-1)+")", args...)
+	rows, err := queryAll(ctx, x.db, func(r *sql.Rows) (row, error) {
+		var v row
+		return v, r.Scan(&v.id, &v.vetted, &v.category, &v.host)
+	}, "SELECT id,vetted,category,host FROM frames_tools WHERE id IN (?"+strings.Repeat(",?", len(hits)-1)+")", args...)
 	if err != nil {
 		return out
 	}
-	for _, v := range rows {
-		out[v[0]] = v[1]
+	for _, r := range rows {
+		out[r.id] = bundlerTool{vetted: r.vetted == 1, category: r.category, host: r.host}
 	}
 	return out
 }
@@ -1285,14 +1318,25 @@ func (q bundlerQuote) put(e map[string]any, price Price) {
 // bundlerListedNote rides on a search answer whose hits show a listed price.
 const bundlerListedNote = "price_source listed is the search index's price and may be stale; tools_get gives the live quote, and a call charges at most that quote's cost."
 
-// cachedQuote is a hit's quote in a search: the live probe's when one is
-// cached, else the index's listed price.
-func (f *bundlerState) cachedQuote(h bundlerHit, now time.Time) bundlerQuote {
+// cachedTool reads the already-cached descriptor and probe without touching
+// the network. tools_get and calls populate these caches; a later search must
+// use their current verdicts instead of its older listing snapshot.
+func (f *bundlerState) cachedTool(tool string, now time.Time) (bundlerDescriptor, bool, bundlerProbe, bool) {
 	f.mu.Lock()
-	p, ok := f.probes.get(h.ID, now)
-	f.mu.Unlock()
-	if ok && p.priced {
+	defer f.mu.Unlock()
+	d, hasDescriptor := f.descriptors.get(tool, now)
+	p, hasProbe := f.probes.get(tool, now)
+	return d, hasDescriptor, p, hasProbe
+}
+
+// hitQuote is a search hit's quote: the cached probe's price, else the cached
+// descriptor's, else the index's listed price.
+func hitQuote(h bundlerHit, d bundlerDescriptor, hasDescriptor bool, p bundlerProbe, hasProbe bool) bundlerQuote {
+	if hasProbe && p.priced {
 		return bundlerQuote{price: p.price, priced: true}
+	}
+	if hasDescriptor && d.priced {
+		return bundlerQuote{price: d.price, priced: true}
 	}
 	return bundlerQuote{price: h.Price, priced: h.Priced, listed: h.Priced}
 }

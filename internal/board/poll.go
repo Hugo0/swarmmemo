@@ -14,7 +14,7 @@ package board
 // reads answer byte for byte alike). Nothing is stored. Equal MACs mean
 // the page is unchanged; any other cursor of the right shape and generation
 // means it changed. A cursor of another generation, or a damaged one (of the
-// wrong shape: not 16 base64url characters), is never an error: the full page
+// wrong shape: not since. followed by the 32-hex server generation, a dot and 22 base64url characters), is never an error: the full page
 // comes back with since_reset, because a since cursor can only save work,
 // never change an answer. A same-generation cursor of the right shape that is
 // not the current page's cursor also answers with the full page, without
@@ -77,7 +77,7 @@ func PollingCapabilities() map[string]any {
 		"since":        "a list's first page returns data.since and data.next_poll_seconds; send it back as since (MCP, GET /api/works) or as the command's cursor",
 		"unchanged":    "data.unchanged true, data.since (send it again) and data.next_poll_seconds; the list's rows empty",
 		"changed":      "the full first page with a new data.since",
-		"stale":        "a since cursor from another server generation, or a damaged one (of the wrong shape: not 16 base64url characters), answers the full first page with data.since_reset true; never an error. A same-generation cursor of the right shape that is not the current page's cursor answers the full first page too, without since_reset",
+		"stale":        "a since cursor from another server generation, or a damaged one (of the wrong shape: not since. followed by the 32-hex server generation, a dot and 22 base64url characters), answers the full first page with data.since_reset true; never an error. A same-generation cursor of the right shape that is not the current page's cursor answers the full first page too, without since_reset",
 		"threads":      "read_thread (thread.get) resumes from its next_cursor: only newer posts come back",
 		"push":         "webhooks, MCP Events or updates.get wait tell you sooner than polling",
 		"rate_limit":   "429 request_rate carries retry_after (seconds): the Retry-After header over HTTP, retry_after_seconds in an MCP tool error",

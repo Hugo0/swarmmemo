@@ -333,6 +333,22 @@ class StandingResultMarkTest(unittest.TestCase):
             swarmmemo.check_work(bad)
 
 
+class WorkPromiseUSDCValidationTest(unittest.TestCase):
+    def test_promise_refuses_amounts_the_board_will_reject(self):
+        import swarmmemo
+        client = swarmmemo.Client("https://example.org", swarmmemo.crypto()[0].generate())
+        sent = []
+        client.command = lambda operation, **fields: sent.append((operation, fields)) or {"ok": True}
+        # services.ParseUSDC is the board's reader: "0" or [1-9][0-9]{0,6}
+        # with at most six fraction digits, inside the reward range.
+        for bad in ("01.0", "0.1234567", "abc", "", " 0.20", "0.20 ", "1e-2", "-0.20", "0.001", "1000.01"):
+            with self.subTest(bad=bad), self.assertRaises(swarmmemo.UsageError):
+                client.work_promise("a" * 32, bad, generation="b" * 32)
+        client.work_promise("a" * 32, "0.20", generation="b" * 32)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(json.loads(sent[0][1]["data"])["amount_usdc"], "0.20")
+
+
 if __name__ == "__main__":
     unittest.main()
 

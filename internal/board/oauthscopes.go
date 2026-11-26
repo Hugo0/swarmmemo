@@ -15,6 +15,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+
+	"swarmmemo/internal/services"
 )
 
 // OAuthScopeSpec is one app scope: Plain is what the consent page says the
@@ -218,7 +220,7 @@ func scopeHolds(ctx context.Context, tx *sql.Tx, where string, c Command, a acto
 			return false, nil
 		}
 		if service == "wakeup" {
-			return bearerWakeupAllowed(ctx, tx, c, app)
+			return bearerWakeupAllowed(ctx, tx, c, a.account, app)
 		}
 		return true, nil
 	}
@@ -285,9 +287,10 @@ func appOwnsRoom(ctx context.Context, tx *sql.Tx, room, app string) (bool, error
 }
 
 // bearerWakeupAllowed is the wakeups scope's rule: schedule at a time or
-// on a room the app owns, cancel, list and notices; never a wake-up on
-// the person's replies, mentions or messages, nor another call's status.
-func bearerWakeupAllowed(ctx context.Context, tx *sql.Tx, c Command, app string) (bool, error) {
+// on a room the app owns, cancel what its list shows, list and notices;
+// never a wake-up on the person's replies, mentions or messages, nor
+// another call's status.
+func bearerWakeupAllowed(ctx context.Context, tx *sql.Tx, c Command, account, app string) (bool, error) {
 	var d struct {
 		Method string          `json:"method"`
 		Args   json.RawMessage `json:"args"`
@@ -300,7 +303,13 @@ func bearerWakeupAllowed(ctx context.Context, tx *sql.Tx, c Command, app string)
 	}
 	switch d.Method {
 	case "cancel":
-		return true, nil
+		// A token cancels only a wake-up its list view shows: the row is the
+		// one the service's cancel picks (services.WakeupCancelTarget).
+		on, room, event, found, err := services.WakeupCancelTarget(ctx, tx, account, d.Args)
+		if err != nil || !found {
+			return false, err
+		}
+		return bearerWakeupVisible(ctx, tx, on, room, event, app)
 	case "schedule":
 		var a struct {
 			On    string          `json:"on"`
@@ -317,6 +326,19 @@ func bearerWakeupAllowed(ctx context.Context, tx *sql.Tx, c Command, app string)
 		if a.On == "room" {
 			return appOwnsRoom(ctx, tx, a.Room, app)
 		}
+	}
+	return false, nil
+}
+
+// bearerWakeupVisible is whether an app's token sees a wake-up (or notice):
+// at a time (no room, no event) or on a room the app owns. Reads filter by
+// it and cancel requires it.
+func bearerWakeupVisible(ctx context.Context, tx *sql.Tx, on, room, event, app string) (bool, error) {
+	if on == "time" && room == "" && event == "" {
+		return true, nil
+	}
+	if on == "room" {
+		return appOwnsRoom(ctx, tx, room, app)
 	}
 	return false, nil
 }
@@ -344,13 +366,9 @@ func bearerWakeupView(ctx context.Context, tx *sql.Tx, result json.RawMessage, a
 			if err := json.Unmarshal(e, &w); err != nil {
 				return nil, err
 			}
-			keep := w.On == "time" && w.Room == "" && w.Event == ""
-			if !keep && w.On == "room" {
-				owned, err := appOwnsRoom(ctx, tx, w.Room, app)
-				if err != nil {
-					return nil, err
-				}
-				keep = owned
+			keep, err := bearerWakeupVisible(ctx, tx, w.On, w.Room, w.Event, app)
+			if err != nil {
+				return nil, err
 			}
 			if keep {
 				kept = append(kept, e)

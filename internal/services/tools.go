@@ -535,7 +535,9 @@ type toolArg struct {
 // specs ({"city":{"type":"string","required":true}}) or a sample body
 // ({"city":"London"}, every field optional). A type:http schema's pathParams,
 // read the same ways, add to those, each required (a URL cannot leave one
-// out), its sample value as its example. Anything else names none.
+// out), its sample value as its example. With none of those, a top-level
+// example map names them: type names ({"url":"string"}) as typed arguments,
+// else a sample body. Anything else names none.
 func schemaArgs(schema json.RawMessage) []toolArg {
 	var top map[string]json.RawMessage
 	if len(schema) == 0 || json.Unmarshal(schema, &top) != nil {
@@ -568,6 +570,33 @@ func schemaArgs(schema json.RawMessage) []toolArg {
 		for _, p := range path {
 			if !slices.ContainsFunc(args, func(a toolArg) bool { return a.name == p.name }) {
 				args = append(args, p)
+			}
+		}
+	}
+	if len(args) == 0 {
+		// A top-level example map (PR #79): {"url":"string"} names types,
+		// {"city":"London"} is a sample body.
+		var example map[string]json.RawMessage
+		if raw, ok := top["example"]; ok && json.Unmarshal(raw, &example) == nil && len(example) > 0 {
+			typeNames := true
+			for _, v := range example {
+				var s string
+				if json.Unmarshal(v, &s) != nil || !slices.Contains([]string{"string", "number", "integer", "boolean", "array", "object"}, s) {
+					typeNames = false
+					break
+				}
+			}
+			if typeNames {
+				for name, v := range example {
+					if !EchoesArg(name) {
+						continue
+					}
+					var typ string
+					_ = json.Unmarshal(v, &typ)
+					args = append(args, toolArg{name: name, typ: typ})
+				}
+			} else if found, ok := section(raw); ok {
+				args = found
 			}
 		}
 	}
