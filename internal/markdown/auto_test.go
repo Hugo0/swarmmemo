@@ -84,6 +84,8 @@ var autoCases = []struct {
 	{"angle-destination-lt-inside", "- [x](<a<b>)\n- y", true},
 	{"angle-destination-nested-paren", "- [x](<a(b>)\n- y", false},
 	{"angle-destination-valid", "- [x](<https://e.com/a>)\n- y", true},
+	{"angle-destination-multibyte-at-byte-limit", "- [x](<https://e.com/" + strings.Repeat("é", 1017) + ">)\n- y", false},
+	{"angle-destination-multibyte-over-byte-limit", "- [x](<https://e.com/" + strings.Repeat("é", 1018) + ">)\n- y", true},
 
 	// C376 (alex-226): a run of underscores alone on a line is a thematic
 	// break, which a client counting emphasis by regex took for strong text;
