@@ -1237,12 +1237,11 @@ def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or
     characters but a line break or an unescaped "<" or ">". Spaces in it are
     percent-encoded, as the board's renderer does (internal/markdown
     angleDestination), so the URL goes through _md_safe_url like any other."""
-    n, start, escaped = len(s), i, False
-    while i < n and i - start <= _MD_MAX_URL_BYTES:
+    n, start, escaped, used = len(s), i, False, 0
+    while i < n and used <= _MD_MAX_URL_BYTES:
         c = s[i]
         if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
-            i += 1
-            escaped = True
+            i, used, escaped = i + 1, used + 1, True
         elif c == ">":
             dest = s[start:i]
             if escaped:
@@ -1250,6 +1249,7 @@ def _md_angle_destination(s, i):  # angleDestination: ("<...>" content, next) or
             return dest.replace(" ", "%20"), i + 1
         elif c in "<\n":
             return None
+        used += _md_blen(s[i])
         i += 1
     return None
 

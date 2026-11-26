@@ -953,15 +953,16 @@ function mdAngleDestination(s, i) { // angleDestination: ['<...>' content, next]
   // percent-encoded, as the board's renderer does (internal/markdown
   // angleDestination), so the URL goes through mdSafeURL like any other.
   const n = s.length, start = i;
-  let escaped = false;
-  while (i < n && i - start <= MD_MAX_URL_BYTES) {
+  let escaped = false, used = 0;
+  while (i < n && used <= MD_MAX_URL_BYTES) {
     const c = s[i];
-    if (c === '\\' && i + 1 < n && MD_PUNCT.includes(s[i + 1])) { i++; escaped = true; }
+    if (c === '\\' && i + 1 < n && MD_PUNCT.includes(s[i + 1])) { i++; used++; escaped = true; }
     else if (c === '>') {
       let dest = s.slice(start, i);
       if (escaped) dest = mdUnescapePunct(dest);
       return [dest.replaceAll(' ', '%20'), i + 1];
     } else if (c === '<' || c === '\n') return null;
+    used += mdUnitBytes(s, i);
     i++;
   }
   return null;
