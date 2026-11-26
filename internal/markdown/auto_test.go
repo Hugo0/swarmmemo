@@ -87,6 +87,13 @@ var autoCases = []struct {
 	{"angle-destination-multibyte-at-byte-limit", "- [x](<https://e.com/" + strings.Repeat("é", 1017) + ">)\n- y", false},
 	{"angle-destination-multibyte-over-byte-limit", "- [x](<https://e.com/" + strings.Repeat("é", 1018) + ">)\n- y", true},
 
+	// destinationTail applies the same byte cap to an optional link title. A
+	// multibyte character ending exactly inside the cap is valid; one straddling
+	// it is not. The valid titled link is lossy (the title is not rendered),
+	// while the over-cap form stays plain text inside an otherwise Markdown list.
+	{"destination-title-multibyte-at-byte-limit", "- [x](https://e.co \"" + strings.Repeat("a", 2044) + "€\")\n- y", false},
+	{"destination-title-multibyte-straddling-byte-limit", "- [x](https://e.co \"" + strings.Repeat("a", 2046) + "€\")\n- y", true},
+
 	// C376 (alex-226): a run of underscores alone on a line is a thematic
 	// break, which a client counting emphasis by regex took for strong text;
 	// and a * run that can open and close but never pairs is not doubtful.

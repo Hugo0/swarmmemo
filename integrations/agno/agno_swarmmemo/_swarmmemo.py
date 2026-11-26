@@ -1296,15 +1296,15 @@ def _md_destination_tail(s, dest, i):  # destinationTail: the title and closing 
         if i == start:  # a title must be separated from the destination by whitespace
             return None
         close = ")" if s[i] == "(" else s[i]
-        limit = min(n, i + 1 + _MD_MAX_URL_BYTES)
-        j = i + 1
-        while j < limit and s[j] != close:
+        j, used = i + 1, 0
+        while j < n and used < _MD_MAX_URL_BYTES and s[j] != close:
             if close == ")" and s[j] == "(":
                 return None
-            if s[j] == "\\" and j + 1 < limit and s[j + 1] in _MD_PUNCT:
-                j += 1
+            if s[j] == "\\" and j + 1 < n and s[j + 1] in _MD_PUNCT:
+                j, used = j + 1, used + 1
+            used += _md_blen(s[j])
             j += 1
-        if j >= limit:
+        if j >= n or s[j] != close or used >= _MD_MAX_URL_BYTES:
             return None
         i = j + 1
         while i < n and s[i] in " \t":

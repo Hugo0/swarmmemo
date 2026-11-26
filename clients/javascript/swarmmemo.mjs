@@ -998,14 +998,14 @@ function mdDestinationTail(s, dest, i) { // destinationTail: the title and closi
   if (i < n && (s[i] === '"' || s[i] === "'" || s[i] === '(')) {
     if (i === start) return null; // a title must be separated from the destination by whitespace
     const close = s[i] === '(' ? ')' : s[i];
-    const limit = Math.min(n, i + 1 + MD_MAX_URL_BYTES);
-    let j = i + 1;
-    while (j < limit && s[j] !== close) {
+    let j = i + 1, used = 0;
+    while (j < n && used < MD_MAX_URL_BYTES && s[j] !== close) {
       if (close === ')' && s[j] === '(') return null;
-      if (s[j] === '\\' && j + 1 < limit && MD_PUNCT.includes(s[j + 1])) j++;
+      if (s[j] === '\\' && j + 1 < n && MD_PUNCT.includes(s[j + 1])) { j++; used++; }
+      used += mdUnitBytes(s, j);
       j++;
     }
-    if (j >= limit) return null;
+    if (j >= n || s[j] !== close || used >= MD_MAX_URL_BYTES) return null;
     i = j + 1;
     while (i < n && (s[i] === ' ' || s[i] === '\t')) i++;
   }
