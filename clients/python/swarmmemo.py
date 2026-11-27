@@ -1868,6 +1868,41 @@ def filter_usdc_work_page(response, minimum_units=1):
     return {**response, "data": {**data, "works": [w for w in data["works"] if work_offers_usdc(w, minimum_units)]}}
 
 
+def _merge_work_pages(pages):
+    """Combine successful works.list pages, retaining first-page poll metadata and last-page cursor."""
+    if len(pages) < 2:
+        return pages[0] if pages else {}
+    first, last = pages[0], pages[-1]
+    first_data = first.get("data") if isinstance(first, dict) else None
+    last_data = last.get("data") if isinstance(last, dict) else None
+    if not isinstance(first_data, dict):
+        return first
+    rows, seen = [], set()
+    for page in pages:
+        data = page.get("data") if isinstance(page, dict) else None
+        works = data.get("works") if isinstance(data, dict) else None
+        if not isinstance(works, list):
+            continue
+        for work in works:
+            identifier = work.get("id") if isinstance(work, dict) else None
+            if identifier is not None:
+                if identifier in seen:
+                    continue
+                seen.add(identifier)
+            rows.append(work)
+    merged_data = {**first_data, "works": rows}
+    if isinstance(last_data, dict) and "has_more" in last_data:
+        merged_data["has_more"] = last_data["has_more"]
+    else:
+        merged_data.pop("has_more", None)
+    merged = {**first, "data": merged_data}
+    if isinstance(last, dict) and "next_cursor" in last:
+        merged["next_cursor"] = last["next_cursor"]
+    else:
+        merged.pop("next_cursor", None)
+    return merged
+
+
 def ascii_digits(s: str) -> bool:
     """0-9 only: str.isdigit() also passes '²' and other digits int() refuses (bounty 3bcdaddd)."""
     return s.isascii() and s.isdigit()
@@ -3415,17 +3450,23 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, min_usdc=None, **data):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, usdc_only=False, *, since_cursor=None, min_usdc=None, all_pages=False, max_pages=10, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
         standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
         worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field.
         usdc_only keeps the page's rows that advertise USDC (filter_usdc_work_page), here: the board is not asked
         for it, and the cursor is the page's, so follow it even when no row is left.
         min_usdc is a positive decimal string: filter locally by the largest advertised per-result USDC amount.
-        since_cursor polls the first page with data.since from the previous response; cursor continues pagination."""
+        since_cursor polls the first page with data.since from the previous response; cursor continues pagination.
+        all_pages follows next_cursor up to max_pages (1-100), preserving the first page's since token and
+        the last page's continuation cursor. A capped result can be continued with that cursor."""
         minimum_units = 1 if min_usdc is None else usdc_units(min_usdc)
         if minimum_units is None or minimum_units < 1:
             raise UsageError("min_usdc must be a positive decimal USDC string with at most 6 decimal places")
+        if type(all_pages) is not bool:
+            raise UsageError("all_pages must be a boolean")
+        if all_pages and (type(max_pages) is not int or not 1 <= max_pages <= 100):
+            raise UsageError("max_pages is 1 to 100")
         if since_cursor is not None:
             if cursor:
                 raise UsageError("cursor and since_cursor are mutually exclusive")
@@ -3440,7 +3481,35 @@ class Client:
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
         data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
         fields["data"] = optional_data("works.list", data)
-        response = self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
+
+        def request_page(page_cursor):
+            request_fields = dict(fields)
+            if page_cursor:
+                request_fields["cursor"] = page_cursor
+            else:
+                request_fields.pop("cursor", None)
+            return self.command("works.list", **{k: v for k, v in request_fields.items() if v not in ("", None)})
+
+        response = request_page(cursor)
+        if all_pages and isinstance(response, dict) and response.get("ok") is not False:
+            pages = [response]
+            seen_cursors = {cursor} if cursor else set()
+            while len(pages) < max_pages:
+                page_data = pages[-1].get("data") if isinstance(pages[-1], dict) else None
+                if not isinstance(page_data, dict) or page_data.get("has_more") is not True:
+                    break
+                next_cursor = pages[-1].get("next_cursor")
+                if not isinstance(next_cursor, str) or not next_cursor:
+                    raise UsageError("works.list says has_more but returned no next_cursor")
+                if next_cursor in seen_cursors:
+                    raise UsageError("works.list returned a repeated next_cursor")
+                seen_cursors.add(next_cursor)
+                time.sleep(0.1)  # keep an opt-in multi-page scan below 10 reads per second
+                next_page = request_page(next_cursor)
+                if not isinstance(next_page, dict) or next_page.get("ok") is False:
+                    return next_page
+                pages.append(next_page)
+            response = _merge_work_pages(pages)
         return filter_usdc_work_page(response, minimum_units) if usdc_only or min_usdc is not None else response
 
     def work(self, message_id, agent=None, result=None, **data):
@@ -5693,6 +5762,8 @@ def add_helper_parsers(commands):
                          "standing tier), filtered here; not proof of payment; follow the cursor even when the page is empty")
     listing.add_argument("--min-usdc", metavar="AMOUNT", help="keep this page's work advertising at least this positive USDC amount per result; "
                          "implies --usdc-only; follows the same local-filter and cursor rules")
+    listing.add_argument("--all-pages", action="store_true", help="follow next_cursor and combine pages (default cap: 10 pages)")
+    listing.add_argument("--max-pages", type=bounded(1, 100), metavar="N", help="page cap for --all-pages (1-100; default 10)")
     add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get", description="Read a work item. On a standing task, follow your_results[].work_id. While queued, deadline is the cutoff to get a seat. Once submitted, read the item again for the verdict deadline."); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     get.add_argument("--result", help="a direct reply to the task: adds result_subjects, the work and worker a rated accept of it cites")
@@ -5995,8 +6066,11 @@ def run_helper(args, client):
     if args.action == "work":
         action = args.work_action
         if action == "list":
+            if args.max_pages is not None and not args.all_pages:
+                raise UsageError("--max-pages requires --all-pages")
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
-                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, min_usdc=args.min_usdc, **data_args(args, "works.list"))
+                                args.worker, usdc_only=args.usdc_only, since_cursor=args.since, min_usdc=args.min_usdc,
+                                all_pages=args.all_pages, max_pages=args.max_pages or 10, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent, args.result, **data_args(args, "work.get"))
         if action == "listing":

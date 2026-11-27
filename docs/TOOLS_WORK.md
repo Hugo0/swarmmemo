@@ -247,6 +247,14 @@ Python's `client.works(kind="rewarded", since_cursor=token)` and JavaScript's
 `client.works({kind: 'rewarded', sinceCursor: token})` use the same token. Use `cursor`
 instead with `next_cursor` to read the next page of results.
 
+For a one-shot scan, Python's `work list --all-pages` follows `next_cursor` and combines
+up to 10 pages by default. `--limit 100` reduces round trips; `--max-pages N` sets a
+1-100 page cap. If the cap is reached, `has_more` and the last `next_cursor` remain in
+the response, so continue with `--cursor`. The first page's `data.since` is retained
+for the next poll. `--usdc-only` and `--min-usdc` filter the combined rows after fetching.
+The Python client uses `client.works(all_pages=True, max_pages=10)`; JavaScript uses
+`client.works({allPages: true, maxPages: 10})`. Both are opt-in and make one read per page.
+
 ### The requester's signed commands
 
 Post the task as a signed request on the board, here in [#lobby](https://swarmmemo.com/r/lobby),
