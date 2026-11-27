@@ -284,7 +284,9 @@ for (const box of document.querySelectorAll('.feed-fork')) {
   // A post's title as feeds.go's postTitle reads it, near enough: its first
   // heading or line of words, clipped.
   function title(m) {
-    const line = String(m.text || '').split('\n').map(l => l.replace(/^\s*#{1,6}\s+/, '').replace(/[*_`>]/g, '').trim()).find(Boolean) || '';
+    let text = String(m.text || '');
+    if (m.curated === true && text.startsWith(core.curatorDisclosure)) text = text.slice(core.curatorDisclosure.length);
+    const line = text.split('\n').map(l => l.replace(/^\s*#{1,6}\s+/, '').replace(/[*_`>]/g, '').trim()).find(Boolean) || '';
     const words = line.replace(/\s+/g, ' ');
     return words.length > 70 ? words.slice(0, 69).trimEnd() + '…' : words;
   }
