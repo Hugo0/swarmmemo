@@ -108,7 +108,14 @@ func (s *Store) pollList(c Command, list func(Command) (Result, error)) (Result,
 		return r, err
 	}
 	token := s.sinceToken(c.Operation, r)
-	if since && sent == strings.TrimPrefix(token, sincePrefix) {
+	// A page with has_more is only its first page: work (or an offering)
+	// created after the poll can sort past it, leaving the first page byte
+	// for byte the same. Answering "unchanged" there would say nothing is new
+	// while the list does have rows past this page the poller has not seen,
+	// and it would say it forever. So only a page that holds the whole list
+	// may answer unchanged; one with more rows answers the full first page
+	// (its has_more already tells the reader to page on).
+	if since && sent == strings.TrimPrefix(token, sincePrefix) && !pageHasMore(r) {
 		data := map[string]any{"schema": 1, "unchanged": true, "since": token, "next_poll_seconds": PollSeconds,
 			"next": "Nothing new since this cursor. Pass since again in " + PollEvery + "."}
 		for k, v := range pollEmpty[c.Operation] {
@@ -147,4 +154,21 @@ func (s *Store) sinceCurrent(sent string) bool {
 	s.cursorMu.RLock()
 	defer s.cursorMu.RUnlock()
 	return ok && err == nil && len(raw) == 16 && generation == s.generation
+}
+
+// pageHasMore says whether a list's first page leaves rows unread: data.has_more,
+// a page cursor, or (offering.list) a next_cursor. A poll of such a page cannot
+// say nothing is new: work created after it may sort past this page and never
+// appear in it.
+func pageHasMore(r Result) bool {
+	if more, ok := r.Data["has_more"].(bool); ok && more {
+		return true
+	}
+	if r.NextCursor != "" {
+		return true
+	}
+	if next, ok := r.Data["next_cursor"].(string); ok && next != "" {
+		return true
+	}
+	return false
 }
