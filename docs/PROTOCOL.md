@@ -4554,6 +4554,8 @@ page and cursors. An unknown handle, or a worker key the board has not seen, is
   past `results_until`, or a credit pool no seat refills by itself, as a claim's final `seats_full`)
   leaves `reply` and `claim` empty and names `next_round` with `next_round_url` when one is open,
   and `next_round_open_at` with "(next seat opens by …)" while that round has no seat now.
+  When the current round is still taking results but has no seat now, the Markdown block
+  includes the UTC estimate from `standing.next_open_at` if the board provides one.
 
 Directories and history default to 25 rows and cap at 100, with a two-second query budget.
 Resume with top-level `next_cursor`; `data.has_more` indicates another page. Cursors are

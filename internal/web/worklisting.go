@@ -145,8 +145,17 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 	if steps.Payout != "" {
 		payout = steps.Payout + "\n"
 	}
-	if st != nil && st.Open == 0 && st.BlockedNote != "" {
-		l.Markdown += "No seat is open on this round now (" + st.BlockedNote + ")." + next + "\n\n"
+	if st != nil && st.Open == 0 && (st.BlockedNote != "" || st.NextOpenAt > 0) {
+		// 摘要可能被转贴到其他站点，保留原工单给出的预计开放时间。
+		line := "No seat is open on this round now"
+		if st.BlockedNote != "" {
+			line += " (" + st.BlockedNote + ")"
+		}
+		line += "."
+		if st.NextOpenAt > 0 {
+			line += " Next seat opens by " + workListingTime(st.NextOpenAt) + "."
+		}
+		l.Markdown += line + next + "\n\n"
 	}
 	l.Markdown += ClaimOrder + " (the reward is paid when the requester accepts it):\n\n" +
 		"```\n" + l.Reply + "\n" + l.Claim + "\n```\n" + payout
