@@ -1513,3 +1513,49 @@ test('workAnswerCommit is sha256 of salt, a newline and the answer (C587)', () =
   assert.equal(workAnswerCommit('3f9c2a7d1e6b4c58a0d2e4f6a8b0c1d2', '42'), 'c01544b3ecadb14ba1b4c8a99b3f94694509716d89e9b2c2914214e584b735b6');
   assert.throws(() => workAnswerCommit('a\nb', '42'), /newline/);
 });
+
+test('works allPages follows next_cursor, deduplicates rows, and keeps first-page poll metadata', async t => {
+  const pages = [
+    {ok: true, next_cursor: 'cursor-2', data: {works: [{id: 'a'}, {id: 'b'}], has_more: true, since: 'since-token', usdc_next: [{id: 'later'}]}},
+    {ok: true, next_cursor: 'cursor-3', data: {works: [{id: 'b'}, {id: 'c'}], has_more: true}},
+    {ok: true, data: {works: [{id: 'd'}], has_more: false}},
+  ];
+  const sent = [], original = globalThis.fetch;
+  globalThis.fetch = async (_url, {body} = {}) => {
+    sent.push(JSON.parse(body));
+    return new Response(JSON.stringify(pages.shift()), {status: 200, headers: {'Content-Type': 'application/json'}});
+  };
+  t.after(() => {globalThis.fetch = original;});
+  const client = new Client({origin: 'https://example.org', anonymous: true});
+  const got = await client.works({kind: 'rewarded', limit: 2, allPages: true, maxPages: 3});
+  assert.equal(sent.length, 3);
+  assert.deepEqual(sent[0], {operation: 'works.list', kind: 'rewarded', limit: 2});
+  assert.deepEqual(sent[1], {operation: 'works.list', kind: 'rewarded', cursor: 'cursor-2', limit: 2});
+  assert.deepEqual(sent[2], {operation: 'works.list', kind: 'rewarded', cursor: 'cursor-3', limit: 2});
+  assert.deepEqual(got.data.works.map(row => row.id), ['a', 'b', 'c', 'd']);
+  assert.equal(got.data.has_more, false);
+  assert.equal(Object.hasOwn(got, 'next_cursor'), false);
+  assert.equal(got.data.since, 'since-token');
+  assert.deepEqual(got.data.usdc_next, [{id: 'later'}]);
+});
+
+test('works allPages respects its cap, continues from sinceCursor, and rejects invalid pagination', async t => {
+  const token = 'since.' + 'a'.repeat(32) + '.' + 'b'.repeat(22);
+  const pages = [
+    {ok: true, next_cursor: 'cursor-2', data: {works: [{id: 'a'}], has_more: true, since: token}},
+    {ok: true, next_cursor: 'cursor-3', data: {works: [{id: 'b'}], has_more: true}},
+  ];
+  const sent = [], original = globalThis.fetch;
+  globalThis.fetch = async (_url, {body} = {}) => {sent.push(JSON.parse(body)); return new Response(JSON.stringify(pages.shift()), {status: 200, headers: {'Content-Type': 'application/json'}});};
+  t.after(() => {globalThis.fetch = original;});
+  const client = new Client({origin: 'https://example.org', anonymous: true});
+  const got = await client.works({sinceCursor: token, allPages: true, maxPages: 2});
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].cursor, token);
+  assert.equal(sent[1].cursor, 'cursor-2');
+  assert.deepEqual(got.data.works.map(row => row.id), ['a', 'b']);
+  assert.equal(got.next_cursor, 'cursor-3');
+  assert.equal(got.data.has_more, true);
+  assert.equal(got.data.since, token);
+  await assert.rejects(client.works({allPages: true, maxPages: 0}), errorCode('invalid_option'));
+});

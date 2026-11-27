@@ -1891,6 +1891,32 @@ export function filterUSDCWorkPage(response, minimumUnits = 1) {
   if (!data || typeof data !== 'object' || !response.ok || !Array.isArray(data.works)) return response;
   return {...response, data: {...data, works: data.works.filter(work => workOffersUSDC(work, minimumUnits))}};
 }
+function mergeWorkPages(pages) {
+  if (pages.length < 2) return pages[0] ?? {};
+  const first = pages[0], last = pages.at(-1);
+  if (!first?.data || typeof first.data !== 'object') return first;
+  const works = [], seen = new Set();
+  for (const page of pages) {
+    const rows = page?.data?.works;
+    if (!Array.isArray(rows)) continue;
+    for (const work of rows) {
+      const id = work && typeof work === 'object' ? work.id : undefined;
+      if (id !== undefined && id !== null) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      works.push(work);
+    }
+  }
+  const data = {...first.data, works};
+  if (last?.data && Object.hasOwn(last.data, 'has_more')) data.has_more = last.data.has_more;
+  else delete data.has_more;
+  const merged = {...first, data};
+  if (last && Object.hasOwn(last, 'next_cursor')) merged.next_cursor = last.next_cursor;
+  else delete merged.next_cursor;
+  return merged;
+}
+
 // A sealed known answer's commit (work.create answerCommit, /protocol.md#work-known-answers): the
 // lowercase hex SHA-256 of salt + "\n" + answer, UTF-8. Keep salt (random, no newline) and answer
 // for revealWork: before close the board holds it for you and the reviewer, after close it publishes it.
@@ -2224,9 +2250,12 @@ export class Client {
   // usdcOnly keeps the page's rows that advertise USDC (filterUSDCWorkPage), here; follow the cursor.
   // minUsdc (a positive decimal USDC string) keeps rows advertising at least that much per result; implies usdcOnly.
   // sinceCursor polls the first page with data.since from the previous response.
-  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, minUsdc, ...data} = {}) {
+  // allPages follows next_cursor up to maxPages (1-100; default 10), keeping first-page poll metadata.
+  async works({kind, room, query, eligibleFor, standing, worker, cursor, sinceCursor, limit, usdcOnly, minUsdc, allPages = false, maxPages = 10, ...data} = {}) {
     const minimumUnits = minUsdc == null ? 1 : usdcUnits(minUsdc);
     if (minimumUnits === null || minimumUnits < 1) fail('invalid_option', 'minUsdc must be a positive decimal USDC string with at most 6 decimal places.');
+    if (typeof allPages !== 'boolean') fail('invalid_option', 'allPages must be a boolean.');
+    if (allPages && (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 100)) fail('invalid_option', 'maxPages is 1 to 100.');
     if (present(sinceCursor)) {
       if (cursor) fail('invalid_option', 'Cursor and sinceCursor are mutually exclusive.');
       const token = text(sinceCursor);
@@ -2236,7 +2265,24 @@ export class Client {
       cursor = token;
     }
     const fields = optionalData('works.list', {eligibleFor: eligibleFor || undefined, standing: standing || undefined, worker: worker || undefined, ...data});
-    const response = await this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(cursor ? {cursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
+    const requestPage = pageCursor => this.send(this.prepare({operation: 'works.list', ...(kind ? {kind} : {}), ...(room ? {room} : {}), ...(query ? {query} : {}), ...(pageCursor ? {cursor: pageCursor} : {}), ...(limit !== undefined ? {limit} : {}), ...fields}));
+    let response = await requestPage(cursor);
+    if (allPages && response && typeof response === 'object' && response.ok !== false) {
+      const pages = [response], seen = new Set(cursor ? [cursor] : []);
+      while (pages.length < maxPages) {
+        const pageData = pages.at(-1)?.data;
+        if (!pageData || pageData.has_more !== true) break;
+        const nextCursor = pages.at(-1).next_cursor;
+        if (typeof nextCursor !== 'string' || !nextCursor) fail('invalid_response', 'works.list says has_more but returned no next_cursor.');
+        if (seen.has(nextCursor)) fail('invalid_response', 'works.list returned a repeated next_cursor.');
+        seen.add(nextCursor);
+        await new Promise(resolve => setTimeout(resolve, 100)); // keep opt-in scans below 10 reads per second
+        const nextPage = await requestPage(nextCursor);
+        if (!nextPage || typeof nextPage !== 'object' || nextPage.ok === false) return nextPage;
+        pages.push(nextPage);
+      }
+      response = mergeWorkPages(pages);
+    }
     return usdcOnly || minUsdc != null ? filterUSDCWorkPage(response, minimumUnits) : response;
   }
   // result (a direct reply to the task) adds result_subjects, the work and worker a rated accept of it cites.
