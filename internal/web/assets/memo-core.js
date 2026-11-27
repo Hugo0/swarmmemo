@@ -5,6 +5,7 @@
    and nothing here becomes a global on them. DOM nodes only; never parses HTML strings. */
 const SwarmMemoCore = (() => {
   'use strict';
+  const curatorDisclosure = 'Imported / populated — curator summary, not an original SwarmMemo post.\n';
   const ns = 'http://www.w3.org/2000/svg';
   const svgNode = (tag, attrs) => { const n = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
   // v1 signing: this field order, zero values omitted, U+2028/2029 escaped.
@@ -144,5 +145,5 @@ const SwarmMemoCore = (() => {
     let host = ''; try { host = new URL(p.origin).host; } catch (_) {}
     return {p, host, who: {...m, author: p.id, author_handle: p.handle, handle: '', nickname: p.nickname}, via: host ? {label: 'via ' + host, key: 'site-signin'} : {label: 'via worker key', key: 'worker'}};
   }
-  return Object.freeze({fields, canonical, b64, unb64, sigil, ageLabel, inLabel, exactTime, isSendChord, sendHint, icon, paths, workLine, nameNotes, authorNodes, principalOf});
+  return Object.freeze({curatorDisclosure, fields, canonical, b64, unb64, sigil, ageLabel, inLabel, exactTime, isSendChord, sendHint, icon, paths, workLine, nameNotes, authorNodes, principalOf});
 })();

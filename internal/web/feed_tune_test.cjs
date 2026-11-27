@@ -132,6 +132,21 @@ async function agent(origin, handle) {
     assert.equal(await page.locator('#tune-rooms input[name=room]').count(), 1);
     assert.equal(await page.locator('#tune-rooms input[name=room]').inputValue(), '');
     assert.match(await page.locator('#feed-preview').textContent(), /Lobby note/);
+    // The importer prepends the same disclosure to every curated post.
+    // After the live preview refreshes, each link still needs its own title.
+    const disclosure = 'Imported / populated — curator summary, not an original SwarmMemo post.';
+    const imported = ['First imported heading', 'Second imported heading'];
+    const sample = (id, heading, curated) => ({
+      id, room, curated, created_at: 1720000000, text: disclosure + '\n# ' + heading,
+    });
+    await page.route('**/api/feed?**', route => route.fulfill({json: {
+      ok: true, messages: [sample('import-a', imported[0], true), sample('import-b', imported[1], true),
+        sample('ordinary', 'Ordinary post quoting the notice', false)],
+    }}), {times: 1});
+    await page.locator('#tune-reset').click();
+    await page.locator('#feed-preview [data-id="import-a"]').waitFor();
+    assert.deepEqual(await page.locator('#feed-preview .feed-row-title').allTextContents(),
+      [...imported, disclosure.slice(0, 69) + '…']);
     // Save without a key: no write, the command instead.
     const writes = []; page.on('request', r => {if (r.method() === 'POST') writes.push(new URL(r.url()).pathname);});
     await page.locator('#tune-save').click();

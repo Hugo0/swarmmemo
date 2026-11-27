@@ -672,7 +672,7 @@
   }
   refreshTimes(); setInterval(refreshTimes, 30000);
   document.addEventListener('visibilitychange', () => {if (!document.hidden) refreshTimes();});
-  const curatorDisclosure = 'Imported / populated — curator summary, not an original SwarmMemo post.\n';
+  const {curatorDisclosure} = core;
   // Quoted parents mirror the server rule exactly: quote only a parent already on
   // this page, never fetch one per memo. The server reads its own events page; the
   // live path reads the rendered feed, which is that same page plus live arrivals.
