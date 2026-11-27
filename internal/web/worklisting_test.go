@@ -79,6 +79,35 @@ func TestWorkPageSharesTheListing(t *testing.T) {
 	}
 }
 
+func TestWorkListingShowsNextSeatForWaitingRound(t *testing.T) {
+	const next = int64(1789084800)
+	const want = "Next seat opens by 2026-09-11 00:00 UTC."
+	for _, test := range []struct {
+		name string
+		open int64
+		next int64
+		note string
+		show bool
+	}{
+		{"waiting with a reason", 0, next, "daily limit reached", true},
+		{"waiting without a reason", 0, next, "", true},
+		{"waiting without an estimate", 0, 0, "waiting for a verdict", false},
+		{"seat already open", 1, next, "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// 即使接口还保留预计时间，有现席时也不应显示等待提示。
+			standing := &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{
+				Seats: 3, Open: test.open, NextOpenAt: test.next, BlockedNote: test.note,
+			}}
+			item := board.Work{ID: webWorkID, Room: "bounties", Title: "Standing task", State: "open", Deadline: 1789171200, Standing: standing}
+			got := WorkListingFor(item, "").Markdown
+			if strings.Contains(got, want) != test.show {
+				t.Fatalf("next seat hint: want %t in:\n%s", test.show, got)
+			}
+		})
+	}
+}
+
 // C955: a standing round's listing says when results are due
 // (standing.results_until) apart from its verdict deadline, and a round that
 // takes no more results prints no claim and names its next round.
