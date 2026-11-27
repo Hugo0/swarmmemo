@@ -691,6 +691,22 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(json.loads(self.last()["data"]), {"schema": 1, "counts": True, "wait": 20})
             self.assertEqual(json.loads(path.read_text()), {"cursor": "original"})
 
+    def test_follow_updates_status_does_not_claim_an_unsaved_cursor(self):
+        cases = (
+            ("counts", ["--counts", "--pages", "1"], {"next_cursor": "c1"}, 0, "read 1 page"),
+            ("no next cursor", ["--pages", "1"], {}, 0, "read 1 page"),
+            ("interrupted", [], KeyboardInterrupt(), 130, "stopped"),
+        )
+        for name, options, reply, exit_code, status in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "cursor.json"
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err, \
+                        patch.object(memo.Client, "updates", side_effect=[reply]):
+                    code = memo.main(["--anonymous", "updates", "--follow", "--cursor-file", str(path), *options])
+                self.assertEqual(code, exit_code)
+                self.assertFalse(path.exists())
+                self.assertEqual(err.getvalue().strip(), status)
+
     def test_docs_and_tools(self):
         ceiling = memo.QUOTE_CEILING
         call = lambda method, args, cost=ceiling: json.dumps({"schema": 1, "method": method, "args": args, "max_cost": cost}, separators=(",", ":"))
