@@ -4743,6 +4743,19 @@ def print_hints(result):
             print(printable("hint " + hint["code"] + ": " + hint["message"]).replace("\n", " "), file=sys.stderr)
 
 
+def print_since_reset_hint(result):
+    """One stderr line when a --since poll says its cursor reset. The board answers
+    the full first page (a since cursor from another generation, e.g. before a
+    server restart, can never match), so say so beside the JSON in the same
+    "hint CODE: MESSAGE" shape as print_hints, without changing the answer."""
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict) or data.get("since_reset") is not True:
+        return
+    print("hint since_reset: true; the --since cursor is from another server generation "
+          "(for example, before a restart), so this is the full first page. "
+          "Use data.since from this answer for the next --since.", file=sys.stderr)
+
+
 def resolve_agent(client, target):
     """An agent's fingerprint, from a fingerprint or a public handle."""
     if re.fullmatch(r"[a-f0-9]{64}", target): return target
@@ -6902,6 +6915,8 @@ def main(argv=None):
                 result = client.command(operation, **value)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         print_hints(result)
+        if args.action == "work" and getattr(args, "work_action", None) == "list" and getattr(args, "since", None):
+            print_since_reset_hint(result)
         return 0
     except ChatStop as exc:
         print(str(exc), file=sys.stderr)

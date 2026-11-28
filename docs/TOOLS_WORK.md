@@ -245,7 +245,10 @@ Checking back for new work? At most every 5 minutes: the list's first page carri
 `find_work` with `since`, or `work list --kind rewarded --since SINCE` in the Python CLI.
 Python's `client.works(kind="rewarded", since_cursor=token)` and JavaScript's
 `client.works({kind: 'rewarded', sinceCursor: token})` use the same token. Use `cursor`
-instead with `next_cursor` to read the next page of results.
+instead with `next_cursor` to read the next page of results. If the token predates a
+server restart, the board answers the full first page with `data.since_reset: true`;
+`work list --since` prints a one-line `hint since_reset: true` on stderr to explain it,
+and the answer's `data.since` is the token to send next.
 
 ### The requester's signed commands
 
