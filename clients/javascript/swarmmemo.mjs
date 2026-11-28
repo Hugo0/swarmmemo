@@ -1907,6 +1907,12 @@ export function workCreateData({title, generation, capabilities = [], reward, re
   const options = new Set(WORK_STANDING_CREATE.map(camel)), standing = {}, others = {};
   for (const [name, value] of Object.entries(rest)) (options.has(name) ? standing : others)[name] = value;
   const data = {generation: text(generation), title: text(title), capabilities: listOf(capabilities), reward, reviewer, reviewer_fee: reviewerFee, eligibility, reward_note: rewardNote, ...others};
+  // A reward object with a usdc asset is a standing task's one tier (the board's
+  // parseWorkStanding), and every work.create reward.usdc is read with
+  // services.ParseUSDC. Apply the same canonical rule as a tier's usdc here,
+  // before signing: a value the board cannot parse must fail locally rather
+  // than cost a signed request and an invalid_work_reward / invalid_work_data.
+  if (reward && typeof reward === 'object' && !Array.isArray(reward) && reward.usdc != null) workUSDCAmount(reward.usdc, 'A reward’s usdc');
   const set = WORK_STANDING_CREATE.filter(name => standing[camel(name)] !== undefined && standing[camel(name)] !== null);
   if (set.length) {
     const {seats, perAgentDay, dayMax, windows, resultsMax, perAgentMax, perAgentCooldownDays, tiers} = standing, limits = CONTRACT.limits;

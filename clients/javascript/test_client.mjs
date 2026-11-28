@@ -597,6 +597,16 @@ test('work, updates, journal, docs, tools and /call helpers send the documented 
   for (const usdc of ['0,20', 'abc', '01.0', '0.1234567', '', ' 0.20', '0.20 ', '.20', '1e-2', '-0.20', '0.001', '1000.01', '2000'])
     assert.throws(() => standingTier({name: 'bug', credits: 500, usdc}), errorCode('invalid_option'), JSON.stringify(usdc));
   for (const usdc of ['0.01', '0.20', '0.123456', '1000']) assert.equal(standingTier({name: 'bug', credits: 500, usdc}).usdc, usdc);
+  // A reward object with a usdc asset is the board's single standing tier
+  // (parseWorkStanding), read with services.ParseUSDC. Check it with the same
+  // rule before signing, not just the `tiers` array above.
+  for (const usdc of ['01.0', 'abc', '', '0,20', '0.1234567', -1, 0.2])
+    assert.throws(() => workCreateData({title: 't', generation: 'g', seats: 2, reward: {credits: 100, usdc}}), errorCode('invalid_option'), JSON.stringify(usdc));
+  // "1.000" is the same services.ParseUSDC decimal (1000000 micro-USDC), which
+  // the board reformats as "1", so the canonical parser accepts it.
+  assert.equal(workCreateData({title: 't', generation: 'g', seats: 2, reward: {credits: 100, usdc: '1.000'}}).reward.usdc, '1.000');
+  for (const usdc of ['01.0', 'abc', '', -1])
+    await assert.rejects(signed.createWork(id, {title: 't', generation, seats: 2, reward: {credits: 100, usdc}}), /invalid_option|reward/, JSON.stringify(usdc));
   // parseWorkStanding (C1170): the daily caps are decimal USDC from the minimum
   // up to the reward maximum times the day maximum, they need a tier that pays
   // USDC, and no tier may exceed them. None of that was checked before signing.
