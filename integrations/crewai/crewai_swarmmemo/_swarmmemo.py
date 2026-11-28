@@ -1914,6 +1914,14 @@ def work_create_data(title, generation, capabilities=(), **fields):
     if unknown: raise UsageError("work.create data takes no " + ", ".join(sorted(unknown)))
     data = {"schema": 1, "generation": generation, "title": title, "capabilities": list_of(capabilities)}
     data.update((k, v) for k, v in fields.items() if v is not None and k not in WORK_STANDING_CREATE)
+    # A reward object with a usdc asset is a standing task's one tier (the board's
+    # parseWorkStanding), and every work.create reward.usdc is read with
+    # services.ParseUSDC. Apply the same canonical rule as a tier's usdc here,
+    # before signing: a value the board cannot parse must fail locally rather
+    # than cost a signed request and an invalid_work_reward / invalid_work_data.
+    reward = data.get("reward")
+    if isinstance(reward, dict) and reward.get("usdc") is not None:
+        work_usdc_amount(reward["usdc"], "a reward's usdc")
     standing = {k: fields[k] for k in WORK_STANDING_CREATE if fields.get(k) is not None}
     if standing:
         seats = standing.get("seats")

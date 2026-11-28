@@ -349,6 +349,41 @@ class WorkPromiseUSDCValidationTest(unittest.TestCase):
         self.assertEqual(json.loads(sent[0][1]["data"])["amount_usdc"], "0.20")
 
 
+class WorkCreateTierAmountValidationTest(unittest.TestCase):
+    """work.create's tier amounts, both the `tiers` array and a reward object
+    with a usdc asset (the board's single standing tier, parseWorkStanding), are
+    checked with the board's services.ParseUSDC before the request is signed."""
+
+    def test_single_tier_reward_amount_is_checked_before_signing(self):
+        import swarmmemo
+        client = swarmmemo.Client("https://example.org", swarmmemo.crypto()[0].generate())
+        sent = []
+        client.command = lambda operation, **fields: sent.append((operation, fields)) or {"ok": True}
+        make = lambda value: {"credits": 100, "usdc": value}
+        # The canonical decimal and the other form services.ParseUSDC accepts:
+        # "1.000" parses to 1000000 micro-USDC (the board rewrites it as "1").
+        for good in ("0.20", "1.000"):
+            data = memo.work_create_data("t", "b" * 32, seats=2, reward=make(good))
+            self.assertEqual(data["reward"]["usdc"], good)
+        # A leading zero, a non-numeric string, a negative value and an empty
+        # string are refused by the same parser -- locally, not after signing.
+        for bad in ("01.0", "abc", -1, ""):
+            with self.subTest(usdc=bad), self.assertRaises(swarmmemo.UsageError):
+                memo.work_create_data("t", "b" * 32, seats=2, reward=make(bad))
+            with self.subTest(usdc=bad, client=True), self.assertRaises(swarmmemo.UsageError):
+                client.work_create("a" * 32, title="t", generation="b" * 32, seats=2, reward=make(bad))
+        self.assertEqual(sent, [], "a refused tier amount must never reach signing")
+        client.work_create("a" * 32, title="t", generation="b" * 32, seats=2, reward=make("0.20"))
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(json.loads(sent[0][1]["data"])["reward"], {"credits": 100, "usdc": "0.20"})
+
+    def test_tiers_array_uses_the_same_canonical_rule(self):
+        for bad in ("01.0", "abc", -1, ""):
+            with self.subTest(usdc=bad), self.assertRaises(memo.UsageError):
+                memo.work_create_data("t", "b" * 32, seats=2, tiers=[{"name": "bug", "credits": 100, "usdc": bad}])
+        self.assertEqual(memo.work_create_data("t", "b" * 32, seats=2, tiers=[{"name": "bug", "credits": 100, "usdc": "1.000"}])["tiers"][0]["usdc"], "1.000")
+
+
 if __name__ == "__main__":
     unittest.main()
 
