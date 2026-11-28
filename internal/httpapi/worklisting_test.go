@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -8,6 +9,56 @@ import (
 	"swarmmemo/internal/board"
 	"swarmmemo/internal/web"
 )
+
+type workListingTestService struct {
+	board.Service
+	item board.Work
+}
+
+func (s *workListingTestService) Execute(_ context.Context, _ board.Command, _ string) (board.Result, error) {
+	return board.Result{OK: true, Data: map[string]any{"work": s.item}}, nil
+}
+
+func TestWorkListingJSONNextOpenAt(t *testing.T) {
+	const estimate = int64(1795968001)
+	for _, tc := range []struct {
+		name     string
+		standing *board.WorkStanding
+		want     string
+	}{
+		{"temporarily full", &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, NextOpenAt: estimate, BlockedBy: board.StandingBlockedDayMax}}, "1795968001"},
+		{"no estimate", &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3}}, ""},
+		{"seat open", &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, Open: 1, NextOpenAt: estimate}}, ""},
+		{"round finished", &board.WorkStanding{WorkStandingSeats: board.WorkStandingSeats{Seats: 3, NextOpenAt: estimate, BlockedBy: board.StandingBlockedResultsUntil}}, ""},
+		{"one-time work", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// 只替换工单数据，固定预计时间，保留 HTTP 路由与 JSON 生成路径。
+			id := strings.Repeat("a", 32)
+			service := &workListingTestService{item: board.Work{ID: id, Title: "Listing fixture", State: "open", Standing: tc.standing}}
+			s := New(service, nil, Config{ServiceID: "swarmmemo.com"})
+			response := makeRequest(s, "GET", "/api/work/"+id+"/listing", "", "")
+			var body struct {
+				Data struct {
+					Listing map[string]json.RawMessage `json:"listing"`
+				} `json:"data"`
+			}
+			if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+				t.Fatalf("listing: %d %s", response.Code, response.Body.String())
+			}
+			if got := string(body.Data.Listing["next_open_at"]); got != tc.want {
+				t.Fatalf("listing.next_open_at: got %q, want %q", got, tc.want)
+			}
+			var payload any
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if err := publicResponseValidator(t, s, "/api/work/{message_id}/listing", "200").Validate(payload); err != nil {
+				t.Fatalf("listing does not match its OpenAPI schema: %v", err)
+			}
+		})
+	}
+}
 
 // GET /api/work/ID/listing (C716): JSON by default, Markdown on request,
 // a valid ref in the URL, and the normal errors for closed, private and
