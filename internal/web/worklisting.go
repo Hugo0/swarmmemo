@@ -28,6 +28,8 @@ type WorkListing struct {
 	// to submit by (C955). Its deadline is the verdict deadline, after it.
 	ResultsUntil   int64  `json:"results_until,omitempty"`
 	ResultsUntilAt string `json:"results_until_at,omitempty"`
+	// NextOpenAt 是本轮预计有新席位的 Unix 秒，由工单的 standing.next_open_at 提供。
+	NextOpenAt int64 `json:"next_open_at,omitempty"`
 	// TakesNoResults says a standing round takes no more results (full,
 	// past results_until, or a final short pool, C1041: work.get's
 	// WorkStanding.TakesNoResults): the listing then carries no reply or claim and
@@ -80,6 +82,9 @@ func WorkListingFor(item board.Work, ref string) WorkListing {
 			l.ResultsUntil, l.ResultsUntilAt = st.ResultsUntil, workListingTime(st.ResultsUntil)
 		}
 		l.TakesNoResults = st.TakesNoResults()
+		if !l.TakesNoResults && st.Open == 0 && st.NextOpenAt > 0 {
+			l.NextOpenAt = st.NextOpenAt
+		}
 		if len(st.NextRound) == 32 { // a work ID
 			l.NextRound, l.NextRoundURL, l.NextRoundOpenAt = st.NextRound, canonicalOrigin+"/work/"+st.NextRound, st.NextRoundOpenAt
 		}
